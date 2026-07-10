@@ -1,28 +1,37 @@
 # REST API
 
-A simple REST API built with Node.js, Express, and SQLite.
+A REST API built with Node.js, Express, and SQLite, plus a React (Vite) frontend.
 
 ## Setup
 
 ```bash
-npm install
+npm run install:all
 ```
 
-## Run
+## Development
+
+Run the API and React UI in two terminals:
 
 ```bash
+# Terminal 1 — API
+npm run dev
+
+# Terminal 2 — React UI (http://localhost:5173)
+npm run dev:frontend
+```
+
+Vite proxies `/api` requests to the Express server on port 3000.
+
+## Production
+
+Build the React app, then start Express (it serves `frontend/dist`):
+
+```bash
+npm run build
 npm start
 ```
 
-For development with auto-reload:
-
-```bash
-npm run dev
-```
-
-The server runs at `http://localhost:3000` by default. Set `PORT` to change it.
-
-Open `http://localhost:3000` in your browser for the web UI.
+Open `http://localhost:3000`.
 
 Data is stored in `items.db` (SQLite). The file is created automatically on first run.
 

@@ -1,21 +1,4 @@
-* {
-  box-sizing: border-box;
-}
-
-body {
-  font-family: system-ui, sans-serif;
-  margin: 0;
-  padding: 2rem;
-  background: #f5f5f5;
-  color: #222;
-}
-
-main {
-  max-width: 640px;
-  margin: 0 auto;
-}
-
-h1 {
+main h1 {
   margin-top: 0;
 }
 
