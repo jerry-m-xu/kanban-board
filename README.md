@@ -88,6 +88,22 @@ Or rebuild the UI into the image when you change it:
 docker compose up --build
 ```
 
+### Debug in Docker (breakpoints)
+
+1. Rebuild once (adds `debugpy`), then start waiting for the debugger:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build
+```
+
+The container will pause until you attach.
+
+2. In Cursor: **Run and Debug** → choose **Attach to Docker** → press **F5**.
+
+3. Set breakpoints in `backend/` (e.g. in `create_item`), then call the API or use the UI.
+
+`--reload` is off in debug mode because it conflicts with breakpoints.
+
 ## Endpoints
 
 | Method | Path | Description |
