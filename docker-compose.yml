@@ -1,13 +1,74 @@
+x-app-base: &app-base
+  build: .
+  environment:
+    SQLITE_PATH: /app/data/items.db
+
 services:
+  # docker compose up --build
+  # docker compose up app --build
   app:
-    build: .
+    <<: *app-base
     ports:
       - "3000:3000"
-    environment:
-      SQLITE_PATH: /app/data/items.db
     volumes:
       - sqlite_data:/app/data
     restart: unless-stopped
+
+  # docker compose up app-dev --build
+  app-dev:
+    <<: *app-base
+    profiles: ["app-dev"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app/backend
+      - sqlite_data:/app/data
+    command:
+      [
+        "uvicorn",
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--app-dir",
+        "backend",
+        "--port",
+        "3000",
+        "--reload",
+      ]
+    restart: "no"
+
+  # docker compose up app-dev-debug --build
+  # then: Run and Debug → "Attach to Docker" → F5
+  # Includes both --reload and debugpy (breakpoints may need re-attach after a reload)
+  app-dev-debug:
+    <<: *app-base
+    profiles: ["app-dev-debug"]
+    ports:
+      - "3000:3000"
+      - "5678:5678"
+    volumes:
+      - ./backend:/app/backend
+      - sqlite_data:/app/data
+    command:
+      [
+        "python",
+        "-m",
+        "debugpy",
+        "--listen",
+        "0.0.0.0:5678",
+        "--wait-for-client",
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--app-dir",
+        "backend",
+        "--port",
+        "3000",
+        "--reload",
+      ]
+    restart: "no"
 
 volumes:
   sqlite_data:

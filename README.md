@@ -50,59 +50,50 @@ Data is stored in `items.db` (SQLite). The file is created automatically on firs
 Requires Docker Desktop running.
 
 ```bash
+# Production-style (built image, no source mount)
 docker compose up --build
+# same as: docker compose up app --build
+
+# Dev — mount backend + auto-reload
+docker compose up app-dev --build
+
+# Dev + debug — reload and debugger (attach on port 5678)
+docker compose up app-dev-debug --build
+# then: Run and Debug → "Attach to Docker" → F5
 ```
 
-Then open `http://localhost:3000`.
+Open `http://localhost:3000`.
 
 SQLite data is kept in a Docker volume (`sqlite_data`), so it persists across container restarts.
 
 ```bash
 docker compose down          # stop
-docker compose up --build -d # rebuild and run in background
+docker compose up --build -d # rebuild and run app in background
 ```
 
-### Live code reload (backend)
+| Service | Command | Behavior |
+|---------|---------|----------|
+| `app` | `docker compose up --build` | Built image, no reload |
+| `app-dev` | `docker compose up app-dev --build` | Mount `backend/`, `--reload` |
+| `app-dev-debug` | `docker compose up app-dev-debug --build` | Mount `backend/`, `--reload` **and** debugpy on `:5678` |
 
-Mount your local `backend/` folder into the container and enable `--reload`:
+Run **one** of these at a time (they all use port 3000).
+
+`app-dev-debug` does both reload and debugging. After a code reload, breakpoints can get flaky — detach/reattach **Attach to Docker** if they stop hitting.
+
+**Frontend note:** the container serves built React files (`frontend/dist`), not JSX source. For live UI edits:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
+# Terminal A
+docker compose up app-dev --build
 
-Edits under `backend/` are visible immediately; Uvicorn restarts on change.
-
-**Frontend note:** the container serves the **built** React files (`frontend/dist`), not the JSX source. For live UI edits, either:
-
-```bash
-# Terminal A — API in Docker with backend mount
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-
-# Terminal B — React with Vite hot reload
+# Terminal B
 npm run dev --prefix frontend
 ```
 
-Or rebuild the UI into the image when you change it:
+Or rebuild the image after UI changes: `docker compose up --build`.
 
-```bash
-docker compose up --build
-```
-
-### Debug in Docker (breakpoints)
-
-1. Rebuild once (adds `debugpy`), then start waiting for the debugger:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build
-```
-
-The container will pause until you attach.
-
-2. In Cursor: **Run and Debug** → choose **Attach to Docker** → press **F5**.
-
-3. Set breakpoints in `backend/` (e.g. in `create_item`), then call the API or use the UI.
-
-`--reload` is off in debug mode because it conflicts with breakpoints.
+For debug mode, set breakpoints in `backend/`, attach with **Attach to Docker**, then hit the API/UI.
 
 ## Endpoints
 
