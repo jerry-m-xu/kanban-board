@@ -1,11 +1,17 @@
 # REST API
 
-A REST API built with Node.js, Express, and SQLite, plus a React (Vite) frontend.
+A REST API built with **FastAPI** (Python) and SQLite, plus a React (Vite) frontend.
 
 ## Setup
 
 ```bash
-npm run install:all
+# Python API (use a Python 3.9+ install with SSL, e.g. Homebrew)
+python3.13 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+
+# React frontend
+npm install --prefix frontend
 ```
 
 ## Development
@@ -13,22 +19,26 @@ npm run install:all
 Run the API and React UI in two terminals:
 
 ```bash
-# Terminal 1 — API
-npm run dev
+# Terminal 1 — API (http://localhost:3000)
+source .venv/bin/activate
+uvicorn main:app --reload --app-dir backend --port 3000
 
 # Terminal 2 — React UI (http://localhost:5173)
-npm run dev:frontend
+npm run dev --prefix frontend
 ```
 
-Vite proxies `/api` requests to the Express server on port 3000.
+Vite proxies `/api` requests to the FastAPI server on port 3000.
+
+Interactive API docs: http://localhost:3000/docs
 
 ## Production
 
-Build the React app, then start Express (it serves `frontend/dist`):
+Build the React app, then start FastAPI (it serves `frontend/dist`):
 
 ```bash
-npm run build
-npm start
+npm run build --prefix frontend
+source .venv/bin/activate
+uvicorn main:app --app-dir backend --port 3000
 ```
 
 Open `http://localhost:3000`.
@@ -41,10 +51,10 @@ Data is stored in `items.db` (SQLite). The file is created automatically on firs
 |--------|------|-------------|
 | GET | `/health` | Health check |
 | GET | `/api/items` | List all items |
-| GET | `/api/items/:id` | Get one item |
+| GET | `/api/items/{id}` | Get one item |
 | POST | `/api/items` | Create an item |
-| PUT | `/api/items/:id` | Update an item |
-| DELETE | `/api/items/:id` | Delete an item |
+| PUT | `/api/items/{id}` | Update an item |
+| DELETE | `/api/items/{id}` | Delete an item |
 
 ## Examples
 

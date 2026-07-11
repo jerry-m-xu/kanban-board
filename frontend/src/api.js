@@ -8,7 +8,11 @@ export async function api(path = "", options = {}) {
 
   if (!response.ok && response.status !== 204) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || `Request failed (${response.status})`);
+    const message =
+      data.error ||
+      (typeof data.detail === "string" ? data.detail : null) ||
+      `Request failed (${response.status})`;
+    throw new Error(message);
   }
 
   if (response.status === 204) return null;
