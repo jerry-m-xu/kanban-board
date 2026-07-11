@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      SQLITE_PATH: /app/data/items.db
+    volumes:
+      - sqlite_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  sqlite_data:

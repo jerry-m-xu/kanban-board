@@ -1,7 +1,13 @@
-from pathlib import Path
+import os
 import sqlite3
+from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "items.db"
+DB_PATH = Path(
+    os.environ.get(
+        "SQLITE_PATH",
+        Path(__file__).resolve().parent.parent / "items.db",
+    )
+)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -11,6 +17,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
         conn.execute(
             """

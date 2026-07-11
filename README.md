@@ -45,6 +45,49 @@ Open `http://localhost:3000`.
 
 Data is stored in `items.db` (SQLite). The file is created automatically on first run.
 
+## Docker
+
+Requires Docker Desktop running.
+
+```bash
+docker compose up --build
+```
+
+Then open `http://localhost:3000`.
+
+SQLite data is kept in a Docker volume (`sqlite_data`), so it persists across container restarts.
+
+```bash
+docker compose down          # stop
+docker compose up --build -d # rebuild and run in background
+```
+
+### Live code reload (backend)
+
+Mount your local `backend/` folder into the container and enable `--reload`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+Edits under `backend/` are visible immediately; Uvicorn restarts on change.
+
+**Frontend note:** the container serves the **built** React files (`frontend/dist`), not the JSX source. For live UI edits, either:
+
+```bash
+# Terminal A — API in Docker with backend mount
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Terminal B — React with Vite hot reload
+npm run dev --prefix frontend
+```
+
+Or rebuild the UI into the image when you change it:
+
+```bash
+docker compose up --build
+```
+
 ## Endpoints
 
 | Method | Path | Description |
