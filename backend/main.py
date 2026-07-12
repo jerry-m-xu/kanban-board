@@ -6,13 +6,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from database import get_connection, init_db, next_position, row_to_item
-from models import Item, ItemCreate, ItemUpdate
+from database import get_connection, init_db, next_position, normalize_due_date, row_to_item
+from models import Item, ItemCreate, ItemUpdate, due_date_allowed_for_status
 
 app = FastAPI(title="REST API")
 
 DIST_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-ITEM_COLUMNS = "id, name, description, status, position"
+ITEM_COLUMNS = "id, name, description, status, position, due_date"
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,11 +56,19 @@ def get_item(item_id: int):
 
 @app.post("/api/items", response_model=Item, status_code=201)
 def create_item(payload: ItemCreate):
+    due_date = normalize_due_date(payload.due_date)
+    error = due_date_allowed_for_status(payload.status, due_date)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+
     with get_connection() as conn:
         position = next_position(conn, payload.status)
         cursor = conn.execute(
-            "INSERT INTO items (name, description, status, position) VALUES (?, ?, ?, ?)",
-            (payload.name, payload.description, payload.status, position),
+            """
+            INSERT INTO items (name, description, status, position, due_date)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (payload.name, payload.description, payload.status, position, due_date),
         )
         conn.commit()
         item_id = cursor.lastrowid
@@ -94,10 +102,26 @@ def update_item(item_id: int, payload: ItemUpdate):
         position = (
             payload.position if payload.position is not None else row["position"]
         )
+        due_date = (
+            normalize_due_date(payload.due_date)
+            if payload.due_date is not None
+            else row["due_date"]
+        )
+
+        status_changed = status != row["status"]
+        due_changed = due_date != row["due_date"]
+        if status_changed or due_changed:
+            error = due_date_allowed_for_status(status, due_date)
+            if error:
+                raise HTTPException(status_code=400, detail=error)
 
         conn.execute(
-            "UPDATE items SET name = ?, description = ?, status = ?, position = ? WHERE id = ?",
-            (name, description, status, position, item_id),
+            """
+            UPDATE items
+            SET name = ?, description = ?, status = ?, position = ?, due_date = ?
+            WHERE id = ?
+            """,
+            (name, description, status, position, due_date, item_id),
         )
         conn.commit()
         updated = conn.execute(

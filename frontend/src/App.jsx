@@ -9,7 +9,18 @@ const COLUMNS = [
   { id: "done", label: "Done" },
 ];
 
-const emptyForm = { name: "", description: "" };
+const DATE_FILTER_MODES = [
+  { id: "any", label: "Any due date" },
+  { id: "on", label: "Due on" },
+  { id: "before", label: "Due before" },
+  { id: "after", label: "Due after" },
+  { id: "between", label: "Due between" },
+];
+
+const PAST_OR_TODAY_COLUMNS = new Set(["backlog", "done"]);
+const TODAY_OR_FUTURE_COLUMNS = new Set(["todo", "in-progress"]);
+
+const emptyForm = { name: "", description: "", due_date: "" };
 
 function sortByPosition(a, b) {
   const positionDiff = (a.position ?? 0) - (b.position ?? 0);
@@ -21,6 +32,71 @@ function withRenumberedPositions(columnItems) {
   return columnItems.map((item, index) => ({ ...item, position: index }));
 }
 
+function todayISO() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dueDateRuleMessage(columnId) {
+  if (PAST_OR_TODAY_COLUMNS.has(columnId)) {
+    return "Backlog and Done only allow tasks due today or earlier";
+  }
+  return "To-do and In Progress only allow tasks due today or later";
+}
+
+function isDueDateAllowedForColumn(dueDate, columnId) {
+  if (!dueDate) return false;
+  const today = todayISO();
+  if (PAST_OR_TODAY_COLUMNS.has(columnId)) return dueDate <= today;
+  if (TODAY_OR_FUTURE_COLUMNS.has(columnId)) return dueDate >= today;
+  return true;
+}
+
+function columnDateInputBounds(columnId) {
+  const today = todayISO();
+  if (PAST_OR_TODAY_COLUMNS.has(columnId)) return { max: today };
+  if (TODAY_OR_FUTURE_COLUMNS.has(columnId)) return { min: today };
+  return {};
+}
+
+function formatDueDate(value) {
+  if (!value) return "No due date";
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return value;
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function matchesDateFilter(item, mode, dateFrom, dateTo) {
+  if (mode === "any") return true;
+
+  const dueDate = item.due_date || "";
+  if (!dueDate) return false;
+
+  if (mode === "on") {
+    return Boolean(dateFrom) && dueDate === dateFrom;
+  }
+  if (mode === "before") {
+    return Boolean(dateFrom) && dueDate < dateFrom;
+  }
+  if (mode === "after") {
+    return Boolean(dateFrom) && dueDate > dateFrom;
+  }
+  if (mode === "between") {
+    if (!dateFrom || !dateTo) return false;
+    const start = dateFrom <= dateTo ? dateFrom : dateTo;
+    const end = dateFrom <= dateTo ? dateTo : dateFrom;
+    return dueDate >= start && dueDate <= end;
+  }
+  return true;
+}
+
 export default function App() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -30,6 +106,10 @@ export default function App() {
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
   const [dragOverItem, setDragOverItem] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFilterMode, setDateFilterMode] = useState("any");
+  const [dateFilterFrom, setDateFilterFrom] = useState("");
+  const [dateFilterTo, setDateFilterTo] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -82,7 +162,13 @@ export default function App() {
     }
     setAddingColumn(null);
     setEditing({ id: item.id, field });
-    setDraft(field === "name" ? item.name : item.description || "");
+    if (field === "name") {
+      setDraft(item.name);
+    } else if (field === "due_date") {
+      setDraft(item.due_date || "");
+    } else {
+      setDraft(item.description || "");
+    }
     showStatus("");
   }
 
@@ -92,13 +178,32 @@ export default function App() {
     const field = editing.field;
     const nextValue = draft.trim();
     const previous =
-      field === "name" ? item.name : item.description || "";
+      field === "name"
+        ? item.name
+        : field === "due_date"
+          ? item.due_date || ""
+          : item.description || "";
 
     if (field === "name" && !nextValue) {
       showStatus("Name is required", true);
       setDraft(item.name);
       clearEditing();
       return;
+    }
+
+    if (field === "due_date") {
+      if (!nextValue) {
+        showStatus("Due date is required", true);
+        setDraft(item.due_date || "");
+        clearEditing();
+        return;
+      }
+      if (!isDueDateAllowedForColumn(nextValue, item.status || "backlog")) {
+        showStatus(dueDateRuleMessage(item.status || "backlog"), true);
+        setDraft(item.due_date || "");
+        clearEditing();
+        return;
+      }
     }
 
     if (nextValue === previous) {
@@ -109,12 +214,21 @@ export default function App() {
     const payload =
       field === "name"
         ? { name: nextValue }
-        : { description: nextValue };
+        : field === "due_date"
+          ? { due_date: nextValue }
+          : { description: nextValue };
 
     const previousItems = items;
     setItems((current) =>
       current.map((entry) =>
-        entry.id === item.id ? { ...entry, ...payload } : entry
+        entry.id === item.id
+          ? {
+              ...entry,
+              ...payload,
+              due_date:
+                field === "due_date" ? nextValue || null : entry.due_date,
+            }
+          : entry
       )
     );
     clearEditing();
@@ -134,12 +248,23 @@ export default function App() {
 
   async function handleCreate(e, columnId) {
     e.preventDefault();
+
+    if (!form.due_date) {
+      showStatus("Due date is required", true);
+      return;
+    }
+    if (!isDueDateAllowedForColumn(form.due_date, columnId)) {
+      showStatus(dueDateRuleMessage(columnId), true);
+      return;
+    }
+
     showStatus("Saving...");
 
     const payload = {
       name: form.name.trim(),
       description: form.description.trim(),
       status: columnId,
+      due_date: form.due_date,
     };
 
     try {
@@ -188,6 +313,19 @@ export default function App() {
     if (!item) return;
 
     const sourceStatus = item.status || "backlog";
+    if (
+      sourceStatus !== targetStatus &&
+      !isDueDateAllowedForColumn(item.due_date, targetStatus)
+    ) {
+      showStatus(
+        item.due_date
+          ? dueDateRuleMessage(targetStatus)
+          : `${dueDateRuleMessage(targetStatus)}. Set a due date first.`,
+        true
+      );
+      return;
+    }
+
     const sourceItems = items
       .filter(
         (entry) =>
@@ -315,7 +453,7 @@ export default function App() {
     setDragOverItem(null);
     if (!Number.isFinite(itemId)) return;
 
-    const columnItems = itemsForColumn(columnId).filter(
+    const columnItems = allItemsForColumn(columnId).filter(
       (entry) => entry.id !== itemId
     );
     await placeItem(itemId, columnId, columnItems.length);
@@ -351,7 +489,7 @@ export default function App() {
     setDragOverItem(null);
     if (!Number.isFinite(itemId) || itemId === item.id) return;
 
-    const columnItems = itemsForColumn(columnId).filter(
+    const columnItems = allItemsForColumn(columnId).filter(
       (entry) => entry.id !== itemId
     );
     const targetIndex = columnItems.findIndex((entry) => entry.id === item.id);
@@ -361,13 +499,33 @@ export default function App() {
     await placeItem(itemId, columnId, insertIndex);
   }
 
-  function itemsForColumn(columnId) {
+  function allItemsForColumn(columnId) {
     return items
       .filter((item) => (item.status || "backlog") === columnId)
       .sort(sortByPosition);
   }
 
+  function visibleItemsForColumn(columnId) {
+    const query = searchQuery.trim().toLowerCase();
+    return allItemsForColumn(columnId).filter((item) => {
+      if (query) {
+        const name = (item.name || "").toLowerCase();
+        const description = (item.description || "").toLowerCase();
+        if (!name.includes(query) && !description.includes(query)) {
+          return false;
+        }
+      }
+      return matchesDateFilter(
+        item,
+        dateFilterMode,
+        dateFilterFrom,
+        dateFilterTo
+      );
+    });
+  }
+
   function renderAddForm(columnId) {
+    const dateBounds = columnDateInputBounds(columnId);
     return (
       <form className="item-form" onSubmit={(e) => handleCreate(e, columnId)}>
         <input
@@ -377,6 +535,15 @@ export default function App() {
           onChange={(e) => setForm({ ...form, name: e.target.value })}
           required
           autoFocus
+        />
+        <input
+          type="date"
+          value={form.due_date}
+          onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+          aria-label="Due date"
+          required
+          min={dateBounds.min}
+          max={dateBounds.max}
         />
         <input
           type="text"
@@ -403,9 +570,64 @@ export default function App() {
     );
   }
 
+  const showDateFrom = dateFilterMode !== "any";
+  const showDateTo = dateFilterMode === "between";
+
   return (
     <main>
-      <h1>Kanban Board</h1>
+      <header className="board-toolbar">
+        <h1>Kanban Board</h1>
+        <div className="board-filters">
+          <div className="date-filter">
+            <label>
+              <span className="visually-hidden">Due date filter</span>
+              <select
+                value={dateFilterMode}
+                onChange={(e) => setDateFilterMode(e.target.value)}
+                aria-label="Due date filter mode"
+              >
+                {DATE_FILTER_MODES.map((mode) => (
+                  <option key={mode.id} value={mode.id}>
+                    {mode.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {showDateFrom && (
+              <label>
+                <span className="visually-hidden">
+                  {dateFilterMode === "between" ? "Start date" : "Date"}
+                </span>
+                <input
+                  type="date"
+                  value={dateFilterFrom}
+                  onChange={(e) => setDateFilterFrom(e.target.value)}
+                />
+              </label>
+            )}
+            {showDateTo && (
+              <label>
+                <span className="visually-hidden">End date</span>
+                <input
+                  type="date"
+                  value={dateFilterTo}
+                  onChange={(e) => setDateFilterTo(e.target.value)}
+                />
+              </label>
+            )}
+          </div>
+          <label className="search-field">
+            <span className="visually-hidden">Search cards</span>
+            <input
+              type="search"
+              placeholder="Search cards..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Search cards"
+            />
+          </label>
+        </div>
+      </header>
 
       <p className={`status${error ? " error" : ""}`}>{status}</p>
 
@@ -414,7 +636,7 @@ export default function App() {
       ) : (
         <div className="board">
           {COLUMNS.map((column) => {
-            const columnItems = itemsForColumn(column.id);
+            const columnItems = visibleItemsForColumn(column.id);
             const isAdding = addingColumn === column.id;
             const isDropTarget = dragOverColumn === column.id;
 
@@ -456,13 +678,19 @@ export default function App() {
                   {columnItems.map((item) => {
                     const editingName =
                       editing?.id === item.id && editing.field === "name";
+                    const editingDueDate =
+                      editing?.id === item.id && editing.field === "due_date";
                     const editingDescription =
                       editing?.id === item.id &&
                       editing.field === "description";
-                    const isEditing = editingName || editingDescription;
+                    const isEditing =
+                      editingName || editingDueDate || editingDescription;
                     const isDragging = draggingId === item.id;
                     const dropEdge =
                       dragOverItem?.id === item.id ? dragOverItem.edge : null;
+                    const dueDateBounds = columnDateInputBounds(
+                      item.status || column.id
+                    );
 
                     return (
                       <li
@@ -527,36 +755,76 @@ export default function App() {
                             ×
                           </button>
                         </div>
-                        <div
-                          className="item-body"
-                          onClick={() => {
-                            if (!editingDescription) {
-                              startFieldEdit(item, "description");
-                            }
-                          }}
-                        >
-                          {editingDescription ? (
-                            <textarea
-                              className="item-description-input"
-                              value={draft}
-                              rows={3}
-                              onChange={(e) => setDraft(e.target.value)}
-                              onBlur={() => saveFieldEdit(item)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Escape") {
-                                  e.preventDefault();
-                                  clearEditing();
-                                }
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              autoFocus
-                            />
-                          ) : (
-                            <p className="item-description">
-                              {item.description || "No description"}
-                            </p>
-                          )}
+                        <div className="item-body">
+                          <div
+                            className={`item-due${
+                              item.due_date ? "" : " item-due-empty"
+                            }`}
+                            onClick={() => {
+                              if (!editingDueDate) {
+                                startFieldEdit(item, "due_date");
+                              }
+                            }}
+                          >
+                            {editingDueDate ? (
+                              <input
+                                className="item-due-input"
+                                type="date"
+                                value={draft}
+                                onChange={(e) => setDraft(e.target.value)}
+                                onBlur={() => saveFieldEdit(item)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    e.currentTarget.blur();
+                                  }
+                                  if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    clearEditing();
+                                  }
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                min={dueDateBounds.min}
+                                max={dueDateBounds.max}
+                                required
+                                autoFocus
+                              />
+                            ) : (
+                              <span>Due: {formatDueDate(item.due_date)}</span>
+                            )}
+                          </div>
+                          <div
+                            className="item-description-wrap"
+                            onClick={() => {
+                              if (!editingDescription) {
+                                startFieldEdit(item, "description");
+                              }
+                            }}
+                          >
+                            {editingDescription ? (
+                              <textarea
+                                className="item-description-input"
+                                value={draft}
+                                rows={3}
+                                onChange={(e) => setDraft(e.target.value)}
+                                onBlur={() => saveFieldEdit(item)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    clearEditing();
+                                  }
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                autoFocus
+                              />
+                            ) : (
+                              <p className="item-description">
+                                {item.description || "No description"}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </li>
                     );

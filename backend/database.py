@@ -44,6 +44,8 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
                 (position, row["id"]),
             )
             counters[status] = position + 1
+    if "due_date" not in columns:
+        conn.execute("ALTER TABLE items ADD COLUMN due_date TEXT")
 
 
 def init_db() -> None:
@@ -56,7 +58,8 @@ def init_db() -> None:
                 name TEXT NOT NULL,
                 description TEXT DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'backlog',
-                position INTEGER NOT NULL DEFAULT 0
+                position INTEGER NOT NULL DEFAULT 0,
+                due_date TEXT
             )
             """
         )
@@ -64,10 +67,13 @@ def init_db() -> None:
         count = conn.execute("SELECT COUNT(*) AS count FROM items").fetchone()["count"]
         if count == 0:
             conn.executemany(
-                "INSERT INTO items (name, description, status, position) VALUES (?, ?, ?, ?)",
+                """
+                INSERT INTO items (name, description, status, position, due_date)
+                VALUES (?, ?, ?, ?, ?)
+                """,
                 [
-                    ("First item", "A sample item", "backlog", 0),
-                    ("Second item", "Another sample item", "todo", 0),
+                    ("First item", "A sample item", "backlog", 0, None),
+                    ("Second item", "Another sample item", "todo", 0, None),
                 ],
             )
         conn.commit()
@@ -81,6 +87,16 @@ def next_position(conn: sqlite3.Connection, status: str) -> int:
     return int(row["max_position"]) + 1
 
 
+from typing import Optional
+
+
+def normalize_due_date(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def row_to_item(row: sqlite3.Row) -> dict:
     return {
         "id": row["id"],
@@ -88,4 +104,5 @@ def row_to_item(row: sqlite3.Row) -> dict:
         "description": row["description"] or "",
         "status": row["status"] or "backlog",
         "position": int(row["position"] or 0),
+        "due_date": row["due_date"] or None,
     }

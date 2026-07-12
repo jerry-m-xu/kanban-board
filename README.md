@@ -92,6 +92,7 @@ After a backend reload while debugging, re-attach if breakpoints stop working.
 | `description` | string | Optional |
 | `status` | string | One of `backlog`, `todo`, `in-progress`, `done` (default: `backlog`) |
 | `position` | integer | Order within the column (0-based) |
+| `due_date` | string | Required ISO date (`YYYY-MM-DD`). **Backlog** / **Done**: today or earlier. **To-do** / **In Progress**: today or later. |
 
 ## Endpoints
 
@@ -113,7 +114,7 @@ curl http://localhost:3000/api/items
 # Create a card in To-do
 curl -X POST http://localhost:3000/api/items \
   -H "Content-Type: application/json" \
-  -d '{"name": "Ship kanban UI", "description": "Four columns", "status": "todo"}'
+  -d '{"name": "Ship kanban UI", "description": "Four columns", "status": "todo", "due_date": "2026-07-20"}'
 
 # Move a card to In Progress
 curl -X PUT http://localhost:3000/api/items/1 \
