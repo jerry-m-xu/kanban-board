@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import "./App.css";
 
@@ -15,12 +15,14 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [addingColumn, setAddingColumn] = useState(null);
-  const [editingId, setEditingId] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState("");
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const draggedRef = useRef(false);
 
   function showStatus(message, isError = false) {
     setStatus(message);
@@ -45,27 +47,78 @@ export default function App() {
     loadItems();
   }, []);
 
-  function resetForm() {
+  function resetAddForm() {
     setForm(emptyForm);
     setAddingColumn(null);
-    setEditingId(null);
+  }
+
+  function clearEditing() {
+    setEditing(null);
+    setDraft("");
   }
 
   function openAddForm(columnId) {
-    setEditingId(null);
+    clearEditing();
     setAddingColumn(columnId);
     setForm(emptyForm);
     showStatus("");
   }
 
-  function startEdit(item) {
+  function startFieldEdit(item, field) {
+    if (draggedRef.current) {
+      draggedRef.current = false;
+      return;
+    }
     setAddingColumn(null);
-    setEditingId(item.id);
-    setForm({
-      name: item.name,
-      description: item.description || "",
-    });
+    setEditing({ id: item.id, field });
+    setDraft(field === "name" ? item.name : item.description || "");
     showStatus("");
+  }
+
+  async function saveFieldEdit(item) {
+    if (!editing || editing.id !== item.id) return;
+
+    const field = editing.field;
+    const nextValue = draft.trim();
+    const previous =
+      field === "name" ? item.name : item.description || "";
+
+    if (field === "name" && !nextValue) {
+      showStatus("Name is required", true);
+      setDraft(item.name);
+      clearEditing();
+      return;
+    }
+
+    if (nextValue === previous) {
+      clearEditing();
+      return;
+    }
+
+    const payload =
+      field === "name"
+        ? { name: nextValue }
+        : { description: nextValue };
+
+    const previousItems = items;
+    setItems((current) =>
+      current.map((entry) =>
+        entry.id === item.id ? { ...entry, ...payload } : entry
+      )
+    );
+    clearEditing();
+    showStatus("Saving...");
+
+    try {
+      await api(`/${item.id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      showStatus("Item updated");
+    } catch (err) {
+      setItems(previousItems);
+      showStatus(err.message, true);
+    }
   }
 
   async function handleCreate(e, columnId) {
@@ -84,30 +137,7 @@ export default function App() {
         body: JSON.stringify(payload),
       });
       showStatus("Item created");
-      resetForm();
-      await loadItems();
-    } catch (err) {
-      showStatus(err.message, true);
-    }
-  }
-
-  async function handleUpdate(e, item) {
-    e.preventDefault();
-    showStatus("Saving...");
-
-    const payload = {
-      name: form.name.trim(),
-      description: form.description.trim(),
-      status: item.status || "backlog",
-    };
-
-    try {
-      await api(`/${item.id}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
-      showStatus("Item updated");
-      resetForm();
+      resetAddForm();
       await loadItems();
     } catch (err) {
       showStatus(err.message, true);
@@ -120,7 +150,7 @@ export default function App() {
     showStatus("Deleting...");
     try {
       await api(`/${id}`, { method: "DELETE" });
-      if (editingId === id) resetForm();
+      if (editing?.id === id) clearEditing();
       showStatus("Item deleted");
       await loadItems();
     } catch (err) {
@@ -156,18 +186,23 @@ export default function App() {
   }
 
   function handleDragStart(e, item) {
-    if (editingId === item.id) {
+    if (editing?.id === item.id) {
       e.preventDefault();
       return;
     }
+    draggedRef.current = false;
     setDraggingId(item.id);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", String(item.id));
   }
 
   function handleDragEnd() {
+    draggedRef.current = true;
     setDraggingId(null);
     setDragOverColumn(null);
+    window.setTimeout(() => {
+      draggedRef.current = false;
+    }, 0);
   }
 
   function handleColumnDragOver(e, columnId) {
@@ -198,9 +233,9 @@ export default function App() {
     return items.filter((item) => (item.status || "backlog") === columnId);
   }
 
-  function renderItemForm({ onSubmit, submitLabel }) {
+  function renderAddForm(columnId) {
     return (
-      <form className="item-form" onSubmit={onSubmit}>
+      <form className="item-form" onSubmit={(e) => handleCreate(e, columnId)}>
         <input
           type="text"
           placeholder="Name"
@@ -217,13 +252,13 @@ export default function App() {
         />
         <div className="form-actions">
           <button type="submit" className="small">
-            {submitLabel}
+            Add
           </button>
           <button
             type="button"
             className="small secondary"
             onClick={() => {
-              resetForm();
+              resetAddForm();
               showStatus("");
             }}
           >
@@ -252,7 +287,9 @@ export default function App() {
             return (
               <section
                 key={column.id}
-                className={`column${isDropTarget ? " column-drop-target" : ""}`}
+                className={`column column-${column.id}${
+                  isDropTarget ? " column-drop-target" : ""
+                }`}
                 onDragOver={(e) => handleColumnDragOver(e, column.id)}
                 onDragLeave={(e) => handleColumnDragLeave(e, column.id)}
                 onDrop={(e) => handleColumnDrop(e, column.id)}
@@ -268,7 +305,7 @@ export default function App() {
                     aria-label={`Add item to ${column.label}`}
                     title="Add item"
                     onClick={() =>
-                      isAdding ? resetForm() : openAddForm(column.id)
+                      isAdding ? resetAddForm() : openAddForm(column.id)
                     }
                   >
                     {isAdding ? "×" : "+"}
@@ -278,58 +315,107 @@ export default function App() {
                 <ul className="item-list">
                   {isAdding && (
                     <li className="item item-form-card">
-                      {renderItemForm({
-                        onSubmit: (e) => handleCreate(e, column.id),
-                        submitLabel: "Add",
-                      })}
+                      {renderAddForm(column.id)}
                     </li>
                   )}
 
                   {columnItems.map((item) => {
-                    const isEditing = editingId === item.id;
+                    const editingName =
+                      editing?.id === item.id && editing.field === "name";
+                    const editingDescription =
+                      editing?.id === item.id &&
+                      editing.field === "description";
+                    const isEditing = editingName || editingDescription;
                     const isDragging = draggingId === item.id;
 
                     return (
                       <li
                         key={item.id}
-                        className={`item${isDragging ? " item-dragging" : ""}${
-                          isEditing ? "" : " item-draggable"
-                        }`}
+                        className={`item item-${column.id}${
+                          isDragging ? " item-dragging" : ""
+                        }${isEditing ? "" : " item-draggable"}`}
                         draggable={!isEditing}
                         onDragStart={(e) => handleDragStart(e, item)}
                         onDragEnd={handleDragEnd}
                       >
-                        {isEditing ? (
-                          renderItemForm({
-                            onSubmit: (e) => handleUpdate(e, item),
-                            submitLabel: "Save",
-                          })
-                        ) : (
-                          <>
-                            <div className="item-info">
-                              <strong>{item.name}</strong>
-                              <span>
-                                {item.description || "No description"}
-                              </span>
-                            </div>
-                            <div className="item-actions">
-                              <button
-                                type="button"
-                                className="small"
-                                onClick={() => startEdit(item)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="small danger"
-                                onClick={() => handleDelete(item.id)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </>
-                        )}
+                        <div
+                          className="item-header"
+                          onClick={() => {
+                            if (!editingName) startFieldEdit(item, "name");
+                          }}
+                        >
+                          {editingName ? (
+                            <input
+                              className="item-header-input"
+                              type="text"
+                              value={draft}
+                              onChange={(e) => setDraft(e.target.value)}
+                              onBlur={() => saveFieldEdit(item)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  clearEditing();
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              autoFocus
+                            />
+                          ) : (
+                            <strong>{item.name}</strong>
+                          )}
+                          <button
+                            type="button"
+                            className="item-delete"
+                            aria-label={`Delete ${item.name}`}
+                            title="Delete"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(item.id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <div
+                          className="item-body"
+                          onClick={() => {
+                            if (!editingDescription) {
+                              startFieldEdit(item, "description");
+                            }
+                          }}
+                        >
+                          {editingDescription ? (
+                            <textarea
+                              className="item-description-input"
+                              value={draft}
+                              rows={3}
+                              onChange={(e) => setDraft(e.target.value)}
+                              onBlur={() => saveFieldEdit(item)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  clearEditing();
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              autoFocus
+                            />
+                          ) : (
+                            <p className="item-description">
+                              {item.description || "No description"}
+                            </p>
+                          )}
+                        </div>
                       </li>
                     );
                   })}

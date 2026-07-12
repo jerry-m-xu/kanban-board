@@ -104,12 +104,71 @@ button.small {
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   box-shadow: none;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.column-backlog {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.column-backlog .column-count {
+  background: #cbd5e1;
+  color: #334155;
+}
+
+.column-todo {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.column-todo .column-count {
+  background: #bfdbfe;
+  color: #1e40af;
+}
+
+.column-in-progress {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.column-in-progress .column-count {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.column-done {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.column-done .column-count {
+  background: #a7f3d0;
+  color: #065f46;
 }
 
 .column-drop-target {
-  background: #eff6ff;
-  border-color: #93c5fd;
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+.column-backlog.column-drop-target {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.column-todo.column-drop-target {
+  background: #dbeafe;
+  color: #3b82f6;
+}
+
+.column-in-progress.column-drop-target {
+  background: #ffedd5;
+  color: #f97316;
+}
+
+.column-done.column-drop-target {
+  background: #d1fae5;
+  color: #10b981;
 }
 
 .column-header {
@@ -151,11 +210,132 @@ button.small {
 .item {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.85rem;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
+}
+
+.item-header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.65rem 2rem 0.65rem 0.85rem;
+  border-bottom: 1px solid transparent;
+  cursor: text;
+}
+
+.item-header strong {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  color: #fff;
+  word-break: break-word;
+}
+
+.item-header-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.item-header-input:focus {
+  outline: none;
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.item-header-input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.item-delete {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.item-delete:hover {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.item-backlog .item-header {
+  background: #64748b;
+  border-bottom-color: #475569;
+}
+
+.item-todo .item-header {
+  background: #3b82f6;
+  border-bottom-color: #2563eb;
+}
+
+.item-in-progress .item-header {
+  background: #ea580c;
+  border-bottom-color: #c2410c;
+}
+
+.item-done .item-header {
+  background: #059669;
+  border-bottom-color: #047857;
+}
+
+.item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  cursor: text;
+  min-height: 3rem;
+}
+
+.item-description {
+  margin: 0;
+  color: #555;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.item-description-input {
+  width: 100%;
+  resize: vertical;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #222;
+  background: #fff;
+}
+
+.item-description-input:focus {
+  outline: none;
+  border-color: #2563eb;
 }
 
 .item-draggable {
@@ -174,22 +354,7 @@ button.small {
   border-style: dashed;
   background: #fff;
   cursor: default;
-}
-
-.item-info strong {
-  display: block;
-  margin-bottom: 0.25rem;
-}
-
-.item-info span {
-  color: #555;
-  font-size: 0.9rem;
-}
-
-.item-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-shrink: 0;
+  padding: 0.85rem;
 }
 
 .status {
