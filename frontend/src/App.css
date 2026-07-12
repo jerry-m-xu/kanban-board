@@ -412,23 +412,78 @@ button.small {
   cursor: default;
 }
 
+.item-prerequisites-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.item-prerequisites-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
 .item-prerequisites-label {
-  align-self: flex-start;
+  align-self: center;
   margin: 0;
   padding: 0;
   border: none;
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
   font-size: 0.75rem;
   font-weight: 600;
   color: #2563eb;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.item-prerequisites-label:hover {
+.item-prerequisites-label:hover,
+.item-prerequisites-label:focus,
+.item-prerequisites-label:focus-visible,
+.item-prerequisites-label:active {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
   color: #1d4ed8;
   text-decoration: underline;
+}
+
+.prereq-expand-button,
+.prereq-add-button {
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 0.85rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.prereq-add-button {
+  font-size: 1.05rem;
+}
+
+.prereq-expand-button:hover,
+.prereq-add-button:hover {
+  background: #d1d5db;
+  color: #111827;
+}
+
+.prereq-add-select {
+  max-width: 8.5rem;
+  padding: 0.15rem 0.3rem;
+  font-size: 0.75rem;
 }
 
 .item-prerequisites-empty {
@@ -476,16 +531,6 @@ button.small {
 .prereq-remove:hover {
   background: #e5e7eb;
   color: #111827;
-}
-
-.prereq-add {
-  margin: 0;
-}
-
-.prereq-add select {
-  width: 100%;
-  padding: 0.25rem 0.4rem;
-  font-size: 0.8rem;
 }
 
 .item-description-wrap {

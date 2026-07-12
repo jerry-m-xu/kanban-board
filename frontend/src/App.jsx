@@ -162,11 +162,58 @@ export default function App() {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [graphItemId, setGraphItemId] = useState(null);
+  const [addingPrereqForId, setAddingPrereqForId] = useState(null);
+  const [expandedPrereqIds, setExpandedPrereqIds] = useState(() => new Set());
   const draggedRef = useRef(false);
+  const statusTimeoutRef = useRef(null);
+  const itemsCountRef = useRef(0);
+
+  useEffect(() => {
+    itemsCountRef.current = items.length;
+  }, [items]);
+
+  useEffect(() => {
+    return () => {
+      if (statusTimeoutRef.current) {
+        window.clearTimeout(statusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function itemCountMessage(count = itemsCountRef.current) {
+    return `${count} item(s)`;
+  }
 
   function showStatus(message, isError = false) {
-    setStatus(message);
-    setError(isError);
+    if (statusTimeoutRef.current) {
+      window.clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = null;
+    }
+
+    const normalized = message || itemCountMessage();
+    setStatus(normalized);
+    setError(Boolean(message) && isError);
+
+    const isCountMessage = /^\d+ item\(s\)$/.test(normalized);
+    const isLoadingMessage = normalized === "Loading...";
+    if (!message || isCountMessage || isLoadingMessage) {
+      return;
+    }
+
+    statusTimeoutRef.current = window.setTimeout(() => {
+      setStatus(itemCountMessage());
+      setError(false);
+      statusTimeoutRef.current = null;
+    }, 5000);
+  }
+
+  function togglePrereqExpanded(itemId) {
+    setExpandedPrereqIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
   }
 
   async function loadItems() {
@@ -174,10 +221,12 @@ export default function App() {
     try {
       const data = await api();
       setItems(data);
-      showStatus(`${data.length} item(s)`);
+      itemsCountRef.current = data.length;
+      showStatus(itemCountMessage(data.length));
     } catch (err) {
       showStatus(err.message, true);
       setItems([]);
+      itemsCountRef.current = 0;
     } finally {
       setLoading(false);
     }
@@ -941,69 +990,123 @@ export default function App() {
                             onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <button
-                              type="button"
-                              className="item-prerequisites-label"
-                              onClick={() => setGraphItemId(item.id)}
-                            >
-                              Prerequisites
-                            </button>
-                            {(item.prerequisites || []).length === 0 ? (
-                              <p className="item-prerequisites-empty">None</p>
-                            ) : (
-                              <ul className="item-prerequisites-list">
-                                {(item.prerequisites || []).map((prereqId) => {
-                                  const prereq = items.find(
-                                    (entry) => entry.id === prereqId
-                                  );
-                                  return (
-                                    <li key={prereqId}>
-                                      <span>
-                                        {prereq ? prereq.name : `#${prereqId}`}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="prereq-remove"
-                                        aria-label={`Remove prerequisite ${
-                                          prereq ? prereq.name : prereqId
-                                        }`}
-                                        onClick={() =>
-                                          removePrerequisite(item, prereqId)
-                                        }
-                                      >
-                                        ×
-                                      </button>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            )}
-                            <label className="prereq-add">
-                              <span className="visually-hidden">
-                                Add prerequisite
-                              </span>
-                              <select
-                                value=""
-                                onChange={(e) => {
-                                  addPrerequisite(item, e.target.value);
-                                  e.target.value = "";
-                                }}
+                            <div className="item-prerequisites-header">
+                              <button
+                                type="button"
+                                className="item-prerequisites-label"
+                                onClick={() => setGraphItemId(item.id)}
                               >
-                                <option value="">Add prerequisite…</option>
-                                {items
-                                  .filter((entry) => {
-                                    if (entry.id === item.id) return false;
-                                    return !(item.prerequisites || []).includes(
-                                      entry.id
-                                    );
-                                  })
-                                  .map((entry) => (
-                                    <option key={entry.id} value={entry.id}>
-                                      {entry.name}
-                                    </option>
-                                  ))}
-                              </select>
-                            </label>
+                                Prerequisites
+                              </button>
+                              <div className="item-prerequisites-actions">
+                                <button
+                                  type="button"
+                                  className="prereq-expand-button"
+                                  aria-label={
+                                    expandedPrereqIds.has(item.id)
+                                      ? "Collapse prerequisites"
+                                      : "Expand prerequisites"
+                                  }
+                                  aria-expanded={expandedPrereqIds.has(item.id)}
+                                  title={
+                                    expandedPrereqIds.has(item.id)
+                                      ? "Collapse"
+                                      : "Expand"
+                                  }
+                                  onClick={() => togglePrereqExpanded(item.id)}
+                                >
+                                  {expandedPrereqIds.has(item.id) ? "▾" : "▸"}
+                                </button>
+                                {addingPrereqForId === item.id ? (
+                                  <select
+                                    className="prereq-add-select"
+                                    value=""
+                                    autoFocus
+                                    onBlur={() => {
+                                      window.setTimeout(() => {
+                                        setAddingPrereqForId((current) =>
+                                          current === item.id ? null : current
+                                        );
+                                      }, 150);
+                                    }}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      if (value) {
+                                        addPrerequisite(item, value);
+                                        setExpandedPrereqIds((current) => {
+                                          const next = new Set(current);
+                                          next.add(item.id);
+                                          return next;
+                                        });
+                                      }
+                                      setAddingPrereqForId(null);
+                                    }}
+                                    aria-label="Add prerequisite"
+                                  >
+                                    <option value="">Select task…</option>
+                                    {items
+                                      .filter((entry) => {
+                                        if (entry.id === item.id) return false;
+                                        return !(
+                                          item.prerequisites || []
+                                        ).includes(entry.id);
+                                      })
+                                      .map((entry) => (
+                                        <option key={entry.id} value={entry.id}>
+                                          {entry.name}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="prereq-add-button"
+                                    aria-label="Add prerequisite"
+                                    title="Add prerequisite"
+                                    onClick={() =>
+                                      setAddingPrereqForId(item.id)
+                                    }
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            {expandedPrereqIds.has(item.id) &&
+                              ((item.prerequisites || []).length === 0 ? (
+                                <p className="item-prerequisites-empty">None</p>
+                              ) : (
+                                <ul className="item-prerequisites-list">
+                                  {(item.prerequisites || []).map(
+                                    (prereqId) => {
+                                      const prereq = items.find(
+                                        (entry) => entry.id === prereqId
+                                      );
+                                      return (
+                                        <li key={prereqId}>
+                                          <span>
+                                            {prereq
+                                              ? prereq.name
+                                              : `#${prereqId}`}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            className="prereq-remove"
+                                            aria-label={`Remove prerequisite ${
+                                              prereq ? prereq.name : prereqId
+                                            }`}
+                                            onClick={() =>
+                                              removePrerequisite(item, prereqId)
+                                            }
+                                          >
+                                            ×
+                                          </button>
+                                        </li>
+                                      );
+                                    }
+                                  )}
+                                </ul>
+                              ))}
                           </div>
                           <div
                             className="item-description-wrap"
