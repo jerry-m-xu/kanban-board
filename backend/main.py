@@ -6,13 +6,31 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from database import get_connection, init_db, next_position, normalize_due_date, row_to_item
-from models import Item, ItemCreate, ItemUpdate, due_date_allowed_for_status
+from database import (
+    get_connection,
+    init_db,
+    load_prerequisite_map,
+    load_status_map,
+    next_position,
+    normalize_due_date,
+    remove_prerequisite_references,
+    row_to_item,
+)
+from models import (
+    Item,
+    ItemCreate,
+    ItemUpdate,
+    dump_prerequisites,
+    due_date_allowed_for_status,
+    normalize_prerequisites,
+    validate_prerequisites,
+    validate_status_move_for_prerequisites,
+)
 
 app = FastAPI(title="REST API")
 
 DIST_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-ITEM_COLUMNS = "id, name, description, status, position, due_date"
+ITEM_COLUMNS = "id, name, description, status, position, due_date, prerequisites"
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,14 +79,32 @@ def create_item(payload: ItemCreate):
     if error:
         raise HTTPException(status_code=400, detail=error)
 
+    prerequisites = normalize_prerequisites(payload.prerequisites)
+
     with get_connection() as conn:
+        prereq_map = load_prerequisite_map(conn)
+        status_map = load_status_map(conn)
+        prereq_error = validate_prerequisites(
+            None, payload.status, prerequisites, prereq_map, status_map
+        )
+        if prereq_error:
+            raise HTTPException(status_code=400, detail=prereq_error)
+
         position = next_position(conn, payload.status)
         cursor = conn.execute(
             """
-            INSERT INTO items (name, description, status, position, due_date)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO items
+                (name, description, status, position, due_date, prerequisites)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (payload.name, payload.description, payload.status, position, due_date),
+            (
+                payload.name,
+                payload.description,
+                payload.status,
+                position,
+                due_date,
+                dump_prerequisites(prerequisites),
+            ),
         )
         conn.commit()
         item_id = cursor.lastrowid
@@ -107,6 +143,12 @@ def update_item(item_id: int, payload: ItemUpdate):
             if payload.due_date is not None
             else row["due_date"]
         )
+        current_item = row_to_item(row)
+        prerequisites = (
+            normalize_prerequisites(payload.prerequisites)
+            if payload.prerequisites is not None
+            else current_item["prerequisites"]
+        )
 
         status_changed = status != row["status"]
         due_changed = due_date != row["due_date"]
@@ -115,13 +157,39 @@ def update_item(item_id: int, payload: ItemUpdate):
             if error:
                 raise HTTPException(status_code=400, detail=error)
 
+        prereq_map = load_prerequisite_map(conn)
+        status_map = load_status_map(conn)
+
+        if payload.prerequisites is not None:
+            prereq_error = validate_prerequisites(
+                item_id, status, prerequisites, prereq_map, status_map
+            )
+            if prereq_error:
+                raise HTTPException(status_code=400, detail=prereq_error)
+
+        if status_changed:
+            move_error = validate_status_move_for_prerequisites(
+                item_id, status, prerequisites, prereq_map, status_map
+            )
+            if move_error:
+                raise HTTPException(status_code=400, detail=move_error)
+
         conn.execute(
             """
             UPDATE items
-            SET name = ?, description = ?, status = ?, position = ?, due_date = ?
+            SET name = ?, description = ?, status = ?, position = ?,
+                due_date = ?, prerequisites = ?
             WHERE id = ?
             """,
-            (name, description, status, position, due_date, item_id),
+            (
+                name,
+                description,
+                status,
+                position,
+                due_date,
+                dump_prerequisites(prerequisites),
+                item_id,
+            ),
         )
         conn.commit()
         updated = conn.execute(
@@ -135,9 +203,10 @@ def update_item(item_id: int, payload: ItemUpdate):
 def delete_item(item_id: int):
     with get_connection() as conn:
         cursor = conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
-        conn.commit()
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Item not found")
+        remove_prerequisite_references(conn, item_id)
+        conn.commit()
 
 
 if DIST_PATH.exists():

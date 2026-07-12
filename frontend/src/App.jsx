@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import DependencyGraphModal from "./DependencyGraphModal";
 import "./App.css";
 
 const COLUMNS = [
@@ -30,6 +31,53 @@ function sortByPosition(a, b) {
 
 function withRenumberedPositions(columnItems) {
   return columnItems.map((item, index) => ({ ...item, position: index }));
+}
+
+function buildPrerequisiteMap(items) {
+  const map = {};
+  for (const item of items) {
+    map[item.id] = [...(item.prerequisites || [])];
+  }
+  return map;
+}
+
+function prerequisitesCreateCycle(items, itemId, prerequisites) {
+  if (prerequisites.includes(itemId)) return true;
+
+  const graph = buildPrerequisiteMap(items);
+  graph[itemId] = [...prerequisites];
+
+  const adjacency = {};
+  for (const [dependentId, prereqIds] of Object.entries(graph)) {
+    for (const prereqId of prereqIds) {
+      if (!adjacency[prereqId]) adjacency[prereqId] = [];
+      adjacency[prereqId].push(Number(dependentId));
+    }
+  }
+
+  const visiting = new Set();
+  const visited = new Set();
+
+  function visit(nodeId) {
+    if (visiting.has(nodeId)) return true;
+    if (visited.has(nodeId)) return false;
+    visiting.add(nodeId);
+    for (const nextId of adjacency[nodeId] || []) {
+      if (visit(nextId)) return true;
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+    return false;
+  }
+
+  const nodeIds = new Set([
+    ...Object.keys(graph).map(Number),
+    ...Object.keys(adjacency).map(Number),
+  ]);
+  for (const nodeId of nodeIds) {
+    if (visit(nodeId)) return true;
+  }
+  return false;
 }
 
 function todayISO() {
@@ -113,6 +161,7 @@ export default function App() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [graphItemId, setGraphItemId] = useState(null);
   const draggedRef = useRef(false);
 
   function showStatus(message, isError = false) {
@@ -137,6 +186,66 @@ export default function App() {
   useEffect(() => {
     loadItems();
   }, []);
+
+  async function savePrerequisites(item, prerequisites) {
+    const unique = [...new Set(prerequisites.map(Number))];
+    if (unique.includes(item.id)) {
+      showStatus("An item cannot be a prerequisite of itself", true);
+      return;
+    }
+    if (prerequisitesCreateCycle(items, item.id, unique)) {
+      showStatus("That prerequisite would create a cycle", true);
+      return;
+    }
+    if ((item.status || "backlog") === "done") {
+      const invalid = unique.find((prereqId) => {
+        const prereq = items.find((entry) => entry.id === prereqId);
+        return !prereq || (prereq.status || "backlog") !== "done";
+      });
+      if (invalid) {
+        showStatus(
+          "Done tasks can only have prerequisites that are also in Done",
+          true
+        );
+        return;
+      }
+    }
+
+    const previousItems = items;
+    setItems((current) =>
+      current.map((entry) =>
+        entry.id === item.id ? { ...entry, prerequisites: unique } : entry
+      )
+    );
+    showStatus("Saving...");
+
+    try {
+      await api(`/${item.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ prerequisites: unique }),
+      });
+      showStatus("Prerequisites updated");
+    } catch (err) {
+      setItems(previousItems);
+      showStatus(err.message, true);
+    }
+  }
+
+  async function addPrerequisite(item, prerequisiteId) {
+    const nextId = Number(prerequisiteId);
+    if (!nextId) return;
+    const current = item.prerequisites || [];
+    if (current.includes(nextId)) return;
+    await savePrerequisites(item, [...current, nextId]);
+  }
+
+  async function removePrerequisite(item, prerequisiteId) {
+    const current = item.prerequisites || [];
+    await savePrerequisites(
+      item,
+      current.filter((id) => id !== prerequisiteId)
+    );
+  }
 
   function resetAddForm() {
     setForm(emptyForm);
@@ -324,6 +433,38 @@ export default function App() {
         true
       );
       return;
+    }
+
+    if (sourceStatus !== targetStatus) {
+      if (targetStatus === "done") {
+        const invalidPrereq = (item.prerequisites || []).find((prereqId) => {
+          const prereq = items.find((entry) => entry.id === prereqId);
+          return !prereq || (prereq.status || "backlog") !== "done";
+        });
+        if (invalidPrereq) {
+          showStatus(
+            "Done tasks can only have prerequisites that are also in Done",
+            true
+          );
+          return;
+        }
+      }
+
+      if (targetStatus !== "done") {
+        const blockedDependent = items.find(
+          (entry) =>
+            entry.id !== itemId &&
+            (entry.status || "backlog") === "done" &&
+            (entry.prerequisites || []).includes(itemId)
+        );
+        if (blockedDependent) {
+          showStatus(
+            "Cannot move this task out of Done while other Done tasks still list it as a prerequisite",
+            true
+          );
+          return;
+        }
+      }
     }
 
     const sourceItems = items
@@ -695,6 +836,7 @@ export default function App() {
                     return (
                       <li
                         key={item.id}
+                        data-item-id={item.id}
                         className={`item item-${column.id}${
                           isDragging ? " item-dragging" : ""
                         }${isEditing ? "" : " item-draggable"}${
@@ -795,6 +937,75 @@ export default function App() {
                             )}
                           </div>
                           <div
+                            className="item-prerequisites"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className="item-prerequisites-label"
+                              onClick={() => setGraphItemId(item.id)}
+                            >
+                              Prerequisites
+                            </button>
+                            {(item.prerequisites || []).length === 0 ? (
+                              <p className="item-prerequisites-empty">None</p>
+                            ) : (
+                              <ul className="item-prerequisites-list">
+                                {(item.prerequisites || []).map((prereqId) => {
+                                  const prereq = items.find(
+                                    (entry) => entry.id === prereqId
+                                  );
+                                  return (
+                                    <li key={prereqId}>
+                                      <span>
+                                        {prereq ? prereq.name : `#${prereqId}`}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="prereq-remove"
+                                        aria-label={`Remove prerequisite ${
+                                          prereq ? prereq.name : prereqId
+                                        }`}
+                                        onClick={() =>
+                                          removePrerequisite(item, prereqId)
+                                        }
+                                      >
+                                        ×
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                            <label className="prereq-add">
+                              <span className="visually-hidden">
+                                Add prerequisite
+                              </span>
+                              <select
+                                value=""
+                                onChange={(e) => {
+                                  addPrerequisite(item, e.target.value);
+                                  e.target.value = "";
+                                }}
+                              >
+                                <option value="">Add prerequisite…</option>
+                                {items
+                                  .filter((entry) => {
+                                    if (entry.id === item.id) return false;
+                                    return !(item.prerequisites || []).includes(
+                                      entry.id
+                                    );
+                                  })
+                                  .map((entry) => (
+                                    <option key={entry.id} value={entry.id}>
+                                      {entry.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div
                             className="item-description-wrap"
                             onClick={() => {
                               if (!editingDescription) {
@@ -839,6 +1050,15 @@ export default function App() {
           })}
         </div>
       )}
+
+      {graphItemId != null &&
+        items.some((entry) => entry.id === graphItemId) && (
+          <DependencyGraphModal
+            rootItem={items.find((entry) => entry.id === graphItemId)}
+            items={items}
+            onClose={() => setGraphItemId(null)}
+          />
+        )}
     </main>
   );
 }

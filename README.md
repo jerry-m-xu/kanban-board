@@ -93,6 +93,7 @@ After a backend reload while debugging, re-attach if breakpoints stop working.
 | `status` | string | One of `backlog`, `todo`, `in-progress`, `done` (default: `backlog`) |
 | `position` | integer | Order within the column (0-based) |
 | `due_date` | string | Required ISO date (`YYYY-MM-DD`). **Backlog** / **Done**: today or earlier. **To-do** / **In Progress**: today or later. |
+| `prerequisites` | list of ints | IDs of prerequisite cards (default `[]`). Cycles are rejected. **Done** cards may only depend on other **Done** cards. |
 
 ## Endpoints
 

@@ -403,6 +403,91 @@ button.small {
   border-color: #2563eb;
 }
 
+.item-prerequisites {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid #e5e7eb;
+  cursor: default;
+}
+
+.item-prerequisites-label {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #2563eb;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.item-prerequisites-label:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.item-prerequisites-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.item-prerequisites-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.item-prerequisites-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #374151;
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem 0.2rem 0.45rem;
+}
+
+.prereq-remove {
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.prereq-remove:hover {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.prereq-add {
+  margin: 0;
+}
+
+.prereq-add select {
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.8rem;
+}
+
 .item-description-wrap {
   cursor: text;
 }
@@ -504,4 +589,149 @@ button.small {
   .search-field {
     flex-basis: auto;
   }
+}
+
+.graph-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 1000;
+}
+
+.graph-modal {
+  width: min(920px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  padding: 1.25rem 1.35rem 1.5rem;
+}
+
+.graph-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.graph-modal-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.graph-modal-subtitle {
+  margin: 0.35rem 0 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.graph-modal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+  color: #4b5563;
+}
+
+.graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.graph-status-icon {
+  font-weight: 700;
+}
+
+.graph-legend-item.status-backlog .graph-status-icon,
+.graph-node.status-backlog .graph-node-status {
+  color: #64748b;
+  fill: #64748b;
+}
+
+.graph-legend-item.status-todo .graph-status-icon,
+.graph-node.status-todo .graph-node-status {
+  color: #2563eb;
+  fill: #2563eb;
+}
+
+.graph-legend-item.status-in-progress .graph-status-icon,
+.graph-node.status-in-progress .graph-node-status {
+  color: #ea580c;
+  fill: #ea580c;
+}
+
+.graph-legend-item.status-done .graph-status-icon,
+.graph-node.status-done .graph-node-status {
+  color: #059669;
+  fill: #059669;
+}
+
+.graph-modal-empty {
+  margin: 0 0 0.75rem;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.graph-canvas-wrap {
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.graph-canvas {
+  display: block;
+  min-width: 100%;
+}
+
+.graph-edge {
+  fill: none;
+  stroke: #9ca3af;
+  stroke-width: 1.5;
+}
+
+.graph-node-card {
+  fill: #fff;
+  stroke: #d1d5db;
+  stroke-width: 1.5;
+}
+
+.graph-node-root .graph-node-card {
+  stroke: #2563eb;
+  stroke-width: 2;
+}
+
+.graph-node-title {
+  font-size: 12px;
+  font-weight: 700;
+  fill: #111827;
+}
+
+.graph-node-status {
+  font-size: 11px;
+  fill: #6b7280;
+}
+
+.graph-node.status-backlog .graph-node-card {
+  stroke: #94a3b8;
+}
+
+.graph-node.status-todo .graph-node-card {
+  stroke: #93c5fd;
+}
+
+.graph-node.status-in-progress .graph-node-card {
+  stroke: #fdba74;
+}
+
+.graph-node.status-done .graph-node-card {
+  stroke: #6ee7b7;
 }
