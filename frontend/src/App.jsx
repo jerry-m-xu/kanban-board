@@ -9,11 +9,12 @@ const COLUMNS = [
   { id: "done", label: "Done" },
 ];
 
-const emptyForm = { name: "", description: "", status: "backlog" };
+const emptyForm = { name: "", description: "" };
 
 export default function App() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
+  const [addingColumn, setAddingColumn] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
@@ -44,43 +45,66 @@ export default function App() {
 
   function resetForm() {
     setForm(emptyForm);
+    setAddingColumn(null);
     setEditingId(null);
   }
 
+  function openAddForm(columnId) {
+    setEditingId(null);
+    setAddingColumn(columnId);
+    setForm(emptyForm);
+    showStatus("");
+  }
+
   function startEdit(item) {
+    setAddingColumn(null);
     setEditingId(item.id);
     setForm({
       name: item.name,
       description: item.description || "",
-      status: item.status || "backlog",
     });
     showStatus("");
   }
 
-  async function handleSubmit(e) {
+  async function handleCreate(e, columnId) {
     e.preventDefault();
     showStatus("Saving...");
 
     const payload = {
       name: form.name.trim(),
       description: form.description.trim(),
-      status: form.status,
+      status: columnId,
     };
 
     try {
-      if (editingId) {
-        await api(`/${editingId}`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        showStatus("Item updated");
-      } else {
-        await api("", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        showStatus("Item created");
-      }
+      await api("", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      showStatus("Item created");
+      resetForm();
+      await loadItems();
+    } catch (err) {
+      showStatus(err.message, true);
+    }
+  }
+
+  async function handleUpdate(e, item) {
+    e.preventDefault();
+    showStatus("Saving...");
+
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      status: item.status || "backlog",
+    };
+
+    try {
+      await api(`/${item.id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      showStatus("Item updated");
       resetForm();
       await loadItems();
     } catch (err) {
@@ -106,62 +130,45 @@ export default function App() {
     return items.filter((item) => (item.status || "backlog") === columnId);
   }
 
+  function renderItemForm({ onSubmit, submitLabel }) {
+    return (
+      <form className="item-form" onSubmit={onSubmit}>
+        <input
+          type="text"
+          placeholder="Name"
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          required
+          autoFocus
+        />
+        <input
+          type="text"
+          placeholder="Description"
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+        />
+        <div className="form-actions">
+          <button type="submit" className="small">
+            {submitLabel}
+          </button>
+          <button
+            type="button"
+            className="small secondary"
+            onClick={() => {
+              resetForm();
+              showStatus("");
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    );
+  }
+
   return (
     <main>
       <h1>Kanban Board</h1>
-
-      <section className="form-section">
-        <h2>{editingId ? "Edit item" : "Add item"}</h2>
-        <form onSubmit={handleSubmit}>
-          <label>
-            Name
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
-          </label>
-          <label>
-            Description
-            <input
-              type="text"
-              value={form.description}
-              onChange={(e) =>
-                setForm({ ...form, description: e.target.value })
-              }
-            />
-          </label>
-          <label>
-            Column
-            <select
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-            >
-              {COLUMNS.map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="form-actions">
-            <button type="submit">{editingId ? "Update" : "Create"}</button>
-            {editingId && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => {
-                  resetForm();
-                  showStatus("");
-                }}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </form>
-      </section>
 
       <p className={`status${error ? " error" : ""}`}>{status}</p>
 
@@ -171,41 +178,75 @@ export default function App() {
         <div className="board">
           {COLUMNS.map((column) => {
             const columnItems = itemsForColumn(column.id);
+            const isAdding = addingColumn === column.id;
+
             return (
               <section key={column.id} className="column">
                 <header className="column-header">
-                  <h2>{column.label}</h2>
-                  <span className="column-count">{columnItems.length}</span>
+                  <div className="column-title">
+                    <h2>{column.label}</h2>
+                    <span className="column-count">{columnItems.length}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Add item to ${column.label}`}
+                    title="Add item"
+                    onClick={() =>
+                      isAdding ? resetForm() : openAddForm(column.id)
+                    }
+                  >
+                    {isAdding ? "×" : "+"}
+                  </button>
                 </header>
-                {columnItems.length === 0 ? (
+
+                <ul className="item-list">
+                  {isAdding && (
+                    <li className="item item-form-card">
+                      {renderItemForm({
+                        onSubmit: (e) => handleCreate(e, column.id),
+                        submitLabel: "Add",
+                      })}
+                    </li>
+                  )}
+
+                  {columnItems.map((item) => (
+                    <li key={item.id} className="item">
+                      {editingId === item.id ? (
+                        renderItemForm({
+                          onSubmit: (e) => handleUpdate(e, item),
+                          submitLabel: "Save",
+                        })
+                      ) : (
+                        <>
+                          <div className="item-info">
+                            <strong>{item.name}</strong>
+                            <span>{item.description || "No description"}</span>
+                          </div>
+                          <div className="item-actions">
+                            <button
+                              type="button"
+                              className="small"
+                              onClick={() => startEdit(item)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="small danger"
+                              onClick={() => handleDelete(item.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+
+                {!isAdding && columnItems.length === 0 && (
                   <p className="empty">No items</p>
-                ) : (
-                  <ul className="item-list">
-                    {columnItems.map((item) => (
-                      <li key={item.id} className="item">
-                        <div className="item-info">
-                          <strong>{item.name}</strong>
-                          <span>{item.description || "No description"}</span>
-                        </div>
-                        <div className="item-actions">
-                          <button
-                            type="button"
-                            className="small"
-                            onClick={() => startEdit(item)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="small danger"
-                            onClick={() => handleDelete(item.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
                 )}
               </section>
             );
