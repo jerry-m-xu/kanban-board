@@ -16,6 +16,25 @@ pip install -r backend/requirements.txt
 npm install --prefix frontend
 ```
 
+## Google sign-in
+
+1. Create an OAuth client in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (type **Web application**).
+2. Add authorized JavaScript origins, e.g. `http://localhost:5173` (and `http://localhost:3000` if you use production Docker).
+3. Copy `.env.example` → `.env` and `frontend/.env.example` → `frontend/.env`, then set the same client ID in both:
+
+```bash
+# .env (backend)
+GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+JWT_SECRET=some-long-random-string
+
+# frontend/.env
+VITE_GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+```
+
+4. Restart the API and Vite dev server. The toolbar shows **Sign in with Google**; after sign-in you’ll see your avatar and a **Sign out** button.
+
+Card ownership per Google account is the next step — for now sign-in establishes a user session (JWT) while the board still uses the shared item list.
+
 ## Development
 
 Run the API and React UI in two terminals:
@@ -23,6 +42,7 @@ Run the API and React UI in two terminals:
 ```bash
 # Terminal 1 — API (http://localhost:3000)
 source .venv/bin/activate
+# optional: export GOOGLE_CLIENT_ID=... JWT_SECRET=...
 uvicorn main:app --reload --app-dir backend --port 3000
 
 # Terminal 2 — React UI (http://localhost:5173)
@@ -95,6 +115,9 @@ After a backend reload while debugging, re-attach if breakpoints stop working.
 | `due_date` | string | Required ISO date (`YYYY-MM-DD`). **Backlog** / **Done**: today or earlier. **To-do** / **In Progress**: today or later. |
 | `prerequisites` | list of ints | IDs of prerequisite cards (default `[]`). Cycles are rejected. **Done** cards may only depend on other **Done** cards. |
 | `attachments` | list | Image/video files attached to the card |
+| `user_id` | integer | Owner (set from the signed-in user; not exposed in the JSON response) |
+
+Cards are **per user**: item and attachment routes require a Bearer JWT. Each signed-in account only sees and edits its own board. Legacy cards without an owner are claimed by the first (sole) user on sign-in.
 
 Attachments are stored under `uploads/` (or `UPLOAD_DIR`) and served at `/api/attachments/{id}/file`. Allowed types: jpeg, png, gif, webp, mp4, webm, mov (max 50MB).
 
@@ -103,31 +126,38 @@ Attachments are stored under `uploads/` (or `UPLOAD_DIR`) and served at `/api/at
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/api/items` | List all cards |
-| GET | `/api/items/{id}` | Get one card |
-| POST | `/api/items` | Create a card |
-| PUT | `/api/items/{id}` | Update a card |
-| DELETE | `/api/items/{id}` | Delete a card |
+| GET | `/api/auth/config` | Public Google client config |
+| POST | `/api/auth/google` | Exchange Google ID token for app JWT |
+| GET | `/api/auth/me` | Current signed-in user |
+| GET | `/api/items` | List the current user’s cards |
+| GET | `/api/items/{id}` | Get one of the current user’s cards |
+| POST | `/api/items` | Create a card for the current user |
+| PUT | `/api/items/{id}` | Update one of the current user’s cards |
+| DELETE | `/api/items/{id}` | Delete one of the current user’s cards |
 | POST | `/api/items/{id}/attachments` | Upload an image or video |
-| GET | `/api/attachments/{id}/file` | Download/view an attachment |
+| GET | `/api/attachments/{id}/file` | Download/view an attachment (`Authorization` or `?token=`) |
 | DELETE | `/api/attachments/{id}` | Delete an attachment |
 
 ## Examples
 
 ```bash
-# List cards
-curl http://localhost:3000/api/items
+# List cards (replace TOKEN with the JWT from Google sign-in)
+curl http://localhost:3000/api/items \
+  -H "Authorization: Bearer TOKEN"
 
 # Create a card in To-do
 curl -X POST http://localhost:3000/api/items \
+  -H "Authorization: Bearer TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name": "Ship kanban UI", "description": "Four columns", "status": "todo", "due_date": "2026-07-20"}'
 
 # Move a card to In Progress
 curl -X PUT http://localhost:3000/api/items/1 \
+  -H "Authorization: Bearer TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status": "in-progress"}'
 
 # Delete a card
-curl -X DELETE http://localhost:3000/api/items/1
+curl -X DELETE http://localhost:3000/api/items/1 \
+  -H "Authorization: Bearer TOKEN"
 ```

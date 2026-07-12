@@ -5,6 +5,7 @@ frontend/dist/
 __pycache__/
 *.pyc
 .env
+frontend/.env
 .DS_Store
 uploads/
 items.db

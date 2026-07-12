@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, deleteAttachment, uploadAttachment } from "./api";
+import { api, deleteAttachment, mediaUrl, uploadAttachment } from "./api";
+import AuthBar from "./AuthBar";
 import DependencyGraphModal from "./DependencyGraphModal";
 import "./App.css";
 
@@ -22,6 +23,12 @@ const PAST_OR_TODAY_COLUMNS = new Set(["backlog", "done"]);
 const TODAY_OR_FUTURE_COLUMNS = new Set(["todo", "in-progress"]);
 
 const emptyForm = { name: "", description: "", due_date: "" };
+
+function boardTitleForUser(user) {
+  if (!user) return "Kanban Board";
+  const name = (user.name || user.email || "User").trim();
+  return `${name}'s Kanban Board`;
+}
 
 function sortByPosition(a, b) {
   const positionDiff = (a.position ?? 0) - (b.position ?? 0);
@@ -146,6 +153,7 @@ function matchesDateFilter(item, mode, dateFrom, dateTo) {
 }
 
 export default function App() {
+  const [user, setUser] = useState(undefined);
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [addingColumn, setAddingColumn] = useState(null);
@@ -168,6 +176,10 @@ export default function App() {
   const draggedRef = useRef(false);
   const statusTimeoutRef = useRef(null);
   const itemsCountRef = useRef(0);
+
+  useEffect(() => {
+    document.title = boardTitleForUser(user);
+  }, [user]);
 
   useEffect(() => {
     itemsCountRef.current = items.length;
@@ -245,8 +257,28 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (user === undefined) {
+      return;
+    }
+    if (!user) {
+      setItems([]);
+      itemsCountRef.current = 0;
+      setLoading(false);
+      setGraphItemId(null);
+      setAddingColumn(null);
+      setEditing(null);
+      setPreviewAttachment(null);
+      setStatus("");
+      setError(false);
+      return;
+    }
+    setLoading(true);
     loadItems();
-  }, []);
+  }, [user]);
+
+  function handleUserChange(nextUser) {
+    setUser(nextUser);
+  }
 
   async function savePrerequisites(item, prerequisites) {
     const unique = [...new Set(prerequisites.map(Number))];
@@ -831,67 +863,84 @@ export default function App() {
 
   const showDateFrom = dateFilterMode !== "any";
   const showDateTo = dateFilterMode === "between";
+  const boardTitle = boardTitleForUser(user);
+  const signedIn = Boolean(user);
 
   return (
-    <main>
+    <main className={signedIn ? undefined : "app-signed-out"}>
       <header className="board-toolbar">
-        <h1>Kanban Board</h1>
-        <div className="board-filters">
-          <div className="date-filter">
-            <label>
-              <span className="visually-hidden">Due date filter</span>
-              <select
-                value={dateFilterMode}
-                onChange={(e) => setDateFilterMode(e.target.value)}
-                aria-label="Due date filter mode"
-              >
-                {DATE_FILTER_MODES.map((mode) => (
-                  <option key={mode.id} value={mode.id}>
-                    {mode.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {showDateFrom && (
-              <label>
-                <span className="visually-hidden">
-                  {dateFilterMode === "between" ? "Start date" : "Date"}
-                </span>
-                <input
-                  type="date"
-                  value={dateFilterFrom}
-                  onChange={(e) => setDateFilterFrom(e.target.value)}
-                />
-              </label>
-            )}
-            {showDateTo && (
-              <label>
-                <span className="visually-hidden">End date</span>
-                <input
-                  type="date"
-                  value={dateFilterTo}
-                  onChange={(e) => setDateFilterTo(e.target.value)}
-                />
-              </label>
-            )}
-          </div>
-          <label className="search-field">
-            <span className="visually-hidden">Search cards</span>
-            <input
-              type="search"
-              placeholder="Search cards..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label="Search cards"
-            />
-          </label>
+        <div className="board-toolbar-main">
+          <h1>{boardTitle}</h1>
+          <AuthBar
+            user={user || null}
+            onUserChange={handleUserChange}
+            onStatus={showStatus}
+          />
         </div>
+        {signedIn ? (
+          <div className="board-filters">
+            <div className="date-filter">
+              <label>
+                <span className="visually-hidden">Due date filter</span>
+                <select
+                  value={dateFilterMode}
+                  onChange={(e) => setDateFilterMode(e.target.value)}
+                  aria-label="Due date filter mode"
+                >
+                  {DATE_FILTER_MODES.map((mode) => (
+                    <option key={mode.id} value={mode.id}>
+                      {mode.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {showDateFrom && (
+                <label>
+                  <span className="visually-hidden">
+                    {dateFilterMode === "between" ? "Start date" : "Date"}
+                  </span>
+                  <input
+                    type="date"
+                    value={dateFilterFrom}
+                    onChange={(e) => setDateFilterFrom(e.target.value)}
+                  />
+                </label>
+              )}
+              {showDateTo && (
+                <label>
+                  <span className="visually-hidden">End date</span>
+                  <input
+                    type="date"
+                    value={dateFilterTo}
+                    onChange={(e) => setDateFilterTo(e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
+            <label className="search-field">
+              <span className="visually-hidden">Search cards</span>
+              <input
+                type="search"
+                placeholder="Search cards..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Search cards"
+              />
+            </label>
+          </div>
+        ) : null}
       </header>
 
-      <p className={`status${error ? " error" : ""}`}>{status}</p>
+      {signedIn ? (
+        <p className={`status${error ? " error" : ""}`}>{status}</p>
+      ) : null}
 
-      {loading ? (
+      {user === undefined || (signedIn && loading) ? (
         <p className="empty">Loading...</p>
+      ) : !signedIn ? (
+        <p className="empty signed-out-empty">
+          Sign in with Google to open your personal kanban board.
+        </p>
       ) : (
         <div className="board">
           {COLUMNS.map((column) => {
@@ -1257,12 +1306,12 @@ export default function App() {
                                     >
                                       {attachment.kind === "image" ? (
                                         <img
-                                          src={attachment.url}
+                                          src={mediaUrl(attachment.url)}
                                           alt={attachment.original_name}
                                         />
                                       ) : (
                                         <video
-                                          src={attachment.url}
+                                          src={mediaUrl(attachment.url)}
                                           muted
                                           preload="metadata"
                                         />
@@ -1350,12 +1399,12 @@ export default function App() {
             <div className="media-preview-content">
               {previewAttachment.kind === "image" ? (
                 <img
-                  src={previewAttachment.url}
+                  src={mediaUrl(previewAttachment.url)}
                   alt={previewAttachment.original_name}
                 />
               ) : (
                 <video
-                  src={previewAttachment.url}
+                  src={mediaUrl(previewAttachment.url)}
                   controls
                   autoPlay
                   preload="metadata"

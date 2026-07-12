@@ -1,25 +1,37 @@
-from typing import List
+from typing import List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
+from auth import (
+    GOOGLE_CLIENT_ID,
+    AuthResponse,
+    AuthUser,
+    GoogleAuthRequest,
+    authenticate_with_google,
+    bearer_scheme,
+    require_user,
+    user_from_access_token,
+)
 from database import (
     MAX_UPLOAD_BYTES,
     UPLOAD_DIR,
     create_attachment,
     delete_attachment_files,
     delete_attachments_for_item,
-    get_attachment,
+    get_attachment_for_user,
     get_connection,
+    get_owned_item,
     init_db,
     kind_for_content_type,
     list_attachments_by_item_ids,
     list_attachments_for_item,
     load_prerequisite_map,
     load_status_map,
+    maybe_claim_orphan_items,
     next_position,
     normalize_due_date,
     remove_prerequisite_references,
@@ -62,6 +74,24 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/auth/config")
+def auth_config():
+    return {
+        "googleClientId": GOOGLE_CLIENT_ID or None,
+        "googleEnabled": bool(GOOGLE_CLIENT_ID),
+    }
+
+
+@app.post("/api/auth/google", response_model=AuthResponse)
+def auth_google(payload: GoogleAuthRequest):
+    return authenticate_with_google(payload.credential)
+
+
+@app.get("/api/auth/me", response_model=AuthUser)
+def auth_me(user: dict = Depends(require_user)):
+    return AuthUser(**user)
+
+
 def hydrate_items(conn, rows) -> List[dict]:
     item_ids = [int(row["id"]) for row in rows]
     attachments_by_item = list_attachments_by_item_ids(conn, item_ids)
@@ -71,50 +101,56 @@ def hydrate_items(conn, rows) -> List[dict]:
 
 
 @app.get("/api/items", response_model=List[Item])
-def list_items():
+def list_items(user: dict = Depends(require_user)):
     with get_connection() as conn:
+        if maybe_claim_orphan_items(conn, user["id"]):
+            conn.commit()
         rows = conn.execute(
-            f"SELECT {ITEM_COLUMNS} FROM items ORDER BY status, position, id"
+            f"""
+            SELECT {ITEM_COLUMNS}
+            FROM items
+            WHERE user_id = ?
+            ORDER BY status, position, id
+            """,
+            (user["id"],),
         ).fetchall()
         return hydrate_items(conn, rows)
 
 
 @app.get("/api/items/{item_id}", response_model=Item)
-def get_item(item_id: int):
+def get_item(item_id: int, user: dict = Depends(require_user)):
     with get_connection() as conn:
-        row = conn.execute(
-            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
-            (item_id,),
-        ).fetchone()
+        row = get_owned_item(conn, item_id, user["id"])
         if row is None:
             raise HTTPException(status_code=404, detail="Item not found")
         return row_to_item(row, list_attachments_for_item(conn, item_id))
 
 
 @app.post("/api/items", response_model=Item, status_code=201)
-def create_item(payload: ItemCreate):
+def create_item(payload: ItemCreate, user: dict = Depends(require_user)):
     due_date = normalize_due_date(payload.due_date)
     error = due_date_allowed_for_status(payload.status, due_date)
     if error:
         raise HTTPException(status_code=400, detail=error)
 
     prerequisites = normalize_prerequisites(payload.prerequisites)
+    user_id = user["id"]
 
     with get_connection() as conn:
-        prereq_map = load_prerequisite_map(conn)
-        status_map = load_status_map(conn)
+        prereq_map = load_prerequisite_map(conn, user_id)
+        status_map = load_status_map(conn, user_id)
         prereq_error = validate_prerequisites(
             None, payload.status, prerequisites, prereq_map, status_map
         )
         if prereq_error:
             raise HTTPException(status_code=400, detail=prereq_error)
 
-        position = next_position(conn, payload.status)
+        position = next_position(conn, payload.status, user_id)
         cursor = conn.execute(
             """
             INSERT INTO items
-                (name, description, status, position, due_date, prerequisites)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (name, description, status, position, due_date, prerequisites, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.name,
@@ -123,24 +159,22 @@ def create_item(payload: ItemCreate):
                 position,
                 due_date,
                 dump_prerequisites(prerequisites),
+                user_id,
             ),
         )
         conn.commit()
         item_id = cursor.lastrowid
-        row = conn.execute(
-            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
-            (item_id,),
-        ).fetchone()
+        row = get_owned_item(conn, item_id, user_id)
         return row_to_item(row, [])
 
 
 @app.put("/api/items/{item_id}", response_model=Item)
-def update_item(item_id: int, payload: ItemUpdate):
+def update_item(
+    item_id: int, payload: ItemUpdate, user: dict = Depends(require_user)
+):
+    user_id = user["id"]
     with get_connection() as conn:
-        row = conn.execute(
-            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
-            (item_id,),
-        ).fetchone()
+        row = get_owned_item(conn, item_id, user_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Item not found")
 
@@ -176,8 +210,8 @@ def update_item(item_id: int, payload: ItemUpdate):
             if error:
                 raise HTTPException(status_code=400, detail=error)
 
-        prereq_map = load_prerequisite_map(conn)
-        status_map = load_status_map(conn)
+        prereq_map = load_prerequisite_map(conn, user_id)
+        status_map = load_status_map(conn, user_id)
 
         if payload.prerequisites is not None:
             prereq_error = validate_prerequisites(
@@ -198,7 +232,7 @@ def update_item(item_id: int, payload: ItemUpdate):
             UPDATE items
             SET name = ?, description = ?, status = ?, position = ?,
                 due_date = ?, prerequisites = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 name,
@@ -208,28 +242,27 @@ def update_item(item_id: int, payload: ItemUpdate):
                 due_date,
                 dump_prerequisites(prerequisites),
                 item_id,
+                user_id,
             ),
         )
         conn.commit()
-        updated = conn.execute(
-            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
-            (item_id,),
-        ).fetchone()
+        updated = get_owned_item(conn, item_id, user_id)
         return row_to_item(updated, list_attachments_for_item(conn, item_id))
 
 
 @app.delete("/api/items/{item_id}", status_code=204)
-def delete_item(item_id: int):
+def delete_item(item_id: int, user: dict = Depends(require_user)):
+    user_id = user["id"]
     with get_connection() as conn:
-        row = conn.execute(
-            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
-            (item_id,),
-        ).fetchone()
+        row = get_owned_item(conn, item_id, user_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Item not found")
         delete_attachments_for_item(conn, item_id)
-        conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
-        remove_prerequisite_references(conn, item_id)
+        conn.execute(
+            "DELETE FROM items WHERE id = ? AND user_id = ?",
+            (item_id, user_id),
+        )
+        remove_prerequisite_references(conn, item_id, user_id)
         conn.commit()
 
 
@@ -238,12 +271,13 @@ def delete_item(item_id: int):
     response_model=Attachment,
     status_code=201,
 )
-async def upload_attachment(item_id: int, file: UploadFile = File(...)):
+async def upload_attachment(
+    item_id: int,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user),
+):
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT id FROM items WHERE id = ?",
-            (item_id,),
-        ).fetchone()
+        row = get_owned_item(conn, item_id, user["id"])
         if row is None:
             raise HTTPException(status_code=404, detail="Item not found")
 
@@ -281,9 +315,21 @@ async def upload_attachment(item_id: int, file: UploadFile = File(...)):
 
 
 @app.get("/api/attachments/{attachment_id}/file")
-def download_attachment(attachment_id: int):
+def download_attachment(
+    attachment_id: int,
+    token: Optional[str] = Query(None),
+    credentials=Depends(bearer_scheme),
+):
+    user = None
+    if credentials is not None and credentials.scheme.lower() == "bearer":
+        user = user_from_access_token(credentials.credentials)
+    if user is None and token:
+        user = user_from_access_token(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     with get_connection() as conn:
-        row = get_attachment(conn, attachment_id)
+        row = get_attachment_for_user(conn, attachment_id, user["id"])
         if row is None:
             raise HTTPException(status_code=404, detail="Attachment not found")
         path = UPLOAD_DIR / row["filename"]
@@ -298,9 +344,11 @@ def download_attachment(attachment_id: int):
 
 
 @app.delete("/api/attachments/{attachment_id}", status_code=204)
-def delete_attachment(attachment_id: int):
+def delete_attachment(
+    attachment_id: int, user: dict = Depends(require_user)
+):
     with get_connection() as conn:
-        row = get_attachment(conn, attachment_id)
+        row = get_attachment_for_user(conn, attachment_id, user["id"])
         if row is None:
             raise HTTPException(status_code=404, detail="Attachment not found")
         filename = row["filename"]

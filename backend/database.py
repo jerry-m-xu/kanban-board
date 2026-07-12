@@ -75,6 +75,12 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE items ADD COLUMN prerequisites TEXT NOT NULL DEFAULT '[]'"
         )
+    if "user_id" not in columns:
+        conn.execute("ALTER TABLE items ADD COLUMN user_id INTEGER")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_items_user_status_pos "
+            "ON items(user_id, status, position)"
+        )
 
 
 def _ensure_attachments_table(conn: sqlite3.Connection) -> None:
@@ -88,6 +94,20 @@ def _ensure_attachments_table(conn: sqlite3.Connection) -> None:
             content_type TEXT NOT NULL,
             kind TEXT NOT NULL,
             FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_users_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_sub TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL,
+            name TEXT NOT NULL,
+            picture TEXT
         )
         """
     )
@@ -112,25 +132,115 @@ def init_db() -> None:
         )
         _ensure_columns(conn)
         _ensure_attachments_table(conn)
-        count = conn.execute("SELECT COUNT(*) AS count FROM items").fetchone()["count"]
-        if count == 0:
-            conn.executemany(
-                """
-                INSERT INTO items (name, description, status, position, due_date, prerequisites)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    ("First item", "A sample item", "backlog", 0, None, "[]"),
-                    ("Second item", "Another sample item", "todo", 0, None, "[]"),
-                ],
-            )
+        _ensure_users_table(conn)
         conn.commit()
 
 
-def next_position(conn: sqlite3.Connection, status: str) -> int:
+def claim_orphan_items(conn: sqlite3.Connection, user_id: int) -> int:
+    cursor = conn.execute(
+        "UPDATE items SET user_id = ? WHERE user_id IS NULL",
+        (user_id,),
+    )
+    return cursor.rowcount
+
+
+def maybe_claim_orphan_items(conn: sqlite3.Connection, user_id: int) -> int:
+    """Assign legacy cards (no owner) to the sole signed-in user."""
+    user_count = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()[
+        "count"
+    ]
+    if user_count != 1:
+        return 0
+    return claim_orphan_items(conn, user_id)
+
+
+def get_owned_item(conn: sqlite3.Connection, item_id: int, user_id: int):
+    return conn.execute(
+        f"""
+        SELECT id, name, description, status, position, due_date, prerequisites, user_id
+        FROM items
+        WHERE id = ? AND user_id = ?
+        """,
+        (item_id, user_id),
+    ).fetchone()
+
+
+def get_attachment_for_user(conn: sqlite3.Connection, attachment_id: int, user_id: int):
+    return conn.execute(
+        """
+        SELECT a.id, a.item_id, a.filename, a.original_name, a.content_type, a.kind
+        FROM attachments a
+        JOIN items i ON i.id = a.item_id
+        WHERE a.id = ? AND i.user_id = ?
+        """,
+        (attachment_id, user_id),
+    ).fetchone()
+
+
+def row_to_user(row: sqlite3.Row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "email": row["email"],
+        "name": row["name"] or row["email"],
+        "picture": row["picture"] or None,
+    }
+
+
+def get_user_by_id(conn: sqlite3.Connection, user_id: int):
     row = conn.execute(
-        "SELECT COALESCE(MAX(position), -1) AS max_position FROM items WHERE status = ?",
-        (status,),
+        "SELECT id, google_sub, email, name, picture FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
+    return row_to_user(row) if row else None
+
+
+def get_or_create_user(
+    conn: sqlite3.Connection,
+    *,
+    google_sub: str,
+    email: str,
+    name: str,
+    picture: Optional[str],
+) -> dict:
+    row = conn.execute(
+        "SELECT id, google_sub, email, name, picture FROM users WHERE google_sub = ?",
+        (google_sub,),
+    ).fetchone()
+    if row is None:
+        cursor = conn.execute(
+            """
+            INSERT INTO users (google_sub, email, name, picture)
+            VALUES (?, ?, ?, ?)
+            """,
+            (google_sub, email, name, picture),
+        )
+        user_id = cursor.lastrowid
+        maybe_claim_orphan_items(conn, user_id)
+        conn.commit()
+        return get_user_by_id(conn, user_id)
+
+    user_id = int(row["id"])
+    conn.execute(
+        """
+        UPDATE users
+        SET email = ?, name = ?, picture = ?
+        WHERE id = ?
+        """,
+        (email, name, picture, user_id),
+    )
+    maybe_claim_orphan_items(conn, user_id)
+    conn.commit()
+    return get_user_by_id(conn, user_id)
+
+
+def next_position(conn: sqlite3.Connection, status: str, user_id: int) -> int:
+    row = conn.execute(
+        """
+        SELECT COALESCE(MAX(position), -1) AS max_position
+        FROM items
+        WHERE status = ? AND user_id = ?
+        """,
+        (status, user_id),
     ).fetchone()
     return int(row["max_position"]) + 1
 
@@ -142,22 +252,33 @@ def normalize_due_date(value: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
-def load_prerequisite_map(conn: sqlite3.Connection) -> dict:
-    rows = conn.execute("SELECT id, prerequisites FROM items").fetchall()
+def load_prerequisite_map(conn: sqlite3.Connection, user_id: int) -> dict:
+    rows = conn.execute(
+        "SELECT id, prerequisites FROM items WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
     return {
         int(row["id"]): parse_prerequisites_json(row["prerequisites"]) for row in rows
     }
 
 
-def load_status_map(conn: sqlite3.Connection) -> dict:
-    rows = conn.execute("SELECT id, status FROM items").fetchall()
+def load_status_map(conn: sqlite3.Connection, user_id: int) -> dict:
+    rows = conn.execute(
+        "SELECT id, status FROM items WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
     return {
         int(row["id"]): (row["status"] or "backlog") for row in rows
     }
 
 
-def remove_prerequisite_references(conn: sqlite3.Connection, item_id: int) -> None:
-    rows = conn.execute("SELECT id, prerequisites FROM items").fetchall()
+def remove_prerequisite_references(
+    conn: sqlite3.Connection, item_id: int, user_id: int
+) -> None:
+    rows = conn.execute(
+        "SELECT id, prerequisites FROM items WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
     for row in rows:
         prerequisites = parse_prerequisites_json(row["prerequisites"])
         if item_id not in prerequisites:

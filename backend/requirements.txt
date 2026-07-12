@@ -2,3 +2,6 @@ fastapi==0.115.6
 uvicorn[standard]==0.32.1
 debugpy==1.8.11
 python-multipart==0.0.20
+google-auth==2.37.0
+PyJWT==2.10.1
+requests==2.32.3
