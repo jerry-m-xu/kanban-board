@@ -12,6 +12,7 @@ from models import Item, ItemCreate, ItemUpdate
 app = FastAPI(title="REST API")
 
 DIST_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+ITEM_COLUMNS = "id, name, description, status"
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +37,7 @@ def health():
 def list_items():
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, name, description FROM items ORDER BY id"
+            f"SELECT {ITEM_COLUMNS} FROM items ORDER BY id"
         ).fetchall()
     return [row_to_item(row) for row in rows]
 
@@ -45,7 +46,7 @@ def list_items():
 def get_item(item_id: int):
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, name, description FROM items WHERE id = ?",
+            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
             (item_id,),
         ).fetchone()
     if row is None:
@@ -57,13 +58,13 @@ def get_item(item_id: int):
 def create_item(payload: ItemCreate):
     with get_connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO items (name, description) VALUES (?, ?)",
-            (payload.name, payload.description),
+            "INSERT INTO items (name, description, status) VALUES (?, ?, ?)",
+            (payload.name, payload.description, payload.status),
         )
         conn.commit()
         item_id = cursor.lastrowid
         row = conn.execute(
-            "SELECT id, name, description FROM items WHERE id = ?",
+            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
             (item_id,),
         ).fetchone()
     return row_to_item(row)
@@ -73,7 +74,7 @@ def create_item(payload: ItemCreate):
 def update_item(item_id: int, payload: ItemUpdate):
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, name, description FROM items WHERE id = ?",
+            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
             (item_id,),
         ).fetchone()
         if row is None:
@@ -88,14 +89,15 @@ def update_item(item_id: int, payload: ItemUpdate):
             if payload.description is not None
             else row["description"]
         )
+        status = payload.status if payload.status is not None else row["status"]
 
         conn.execute(
-            "UPDATE items SET name = ?, description = ? WHERE id = ?",
-            (name, description, item_id),
+            "UPDATE items SET name = ?, description = ?, status = ? WHERE id = ?",
+            (name, description, status, item_id),
         )
         conn.commit()
         updated = conn.execute(
-            "SELECT id, name, description FROM items WHERE id = ?",
+            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
             (item_id,),
         ).fetchone()
     return row_to_item(updated)

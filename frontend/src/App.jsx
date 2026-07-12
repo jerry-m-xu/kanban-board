@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import "./App.css";
 
-const emptyForm = { name: "", description: "" };
+const COLUMNS = [
+  { id: "backlog", label: "Backlog" },
+  { id: "todo", label: "To-do" },
+  { id: "in-progress", label: "In Progress" },
+  { id: "done", label: "Done" },
+];
+
+const emptyForm = { name: "", description: "", status: "backlog" };
 
 export default function App() {
   const [items, setItems] = useState([]);
@@ -45,6 +52,7 @@ export default function App() {
     setForm({
       name: item.name,
       description: item.description || "",
+      status: item.status || "backlog",
     });
     showStatus("");
   }
@@ -56,6 +64,7 @@ export default function App() {
     const payload = {
       name: form.name.trim(),
       description: form.description.trim(),
+      status: form.status,
     };
 
     try {
@@ -93,9 +102,13 @@ export default function App() {
     }
   }
 
+  function itemsForColumn(columnId) {
+    return items.filter((item) => (item.status || "backlog") === columnId);
+  }
+
   return (
     <main>
-      <h1>Items</h1>
+      <h1>Kanban Board</h1>
 
       <section className="form-section">
         <h2>{editingId ? "Edit item" : "Add item"}</h2>
@@ -119,6 +132,19 @@ export default function App() {
               }
             />
           </label>
+          <label>
+            Column
+            <select
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+            >
+              {COLUMNS.map((column) => (
+                <option key={column.id} value={column.id}>
+                  {column.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="form-actions">
             <button type="submit">{editingId ? "Update" : "Create"}</button>
             {editingId && (
@@ -137,42 +163,55 @@ export default function App() {
         </form>
       </section>
 
-      <section>
-        <h2>All items</h2>
-        <p className={`status${error ? " error" : ""}`}>{status}</p>
-        {loading ? (
-          <p className="empty">Loading...</p>
-        ) : items.length === 0 ? (
-          <p className="empty">No items yet.</p>
-        ) : (
-          <ul id="item-list">
-            {items.map((item) => (
-              <li key={item.id} className="item">
-                <div className="item-info">
-                  <strong>{item.name}</strong>
-                  <span>{item.description || "No description"}</span>
-                </div>
-                <div className="item-actions">
-                  <button
-                    type="button"
-                    className="small"
-                    onClick={() => startEdit(item)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="small danger"
-                    onClick={() => handleDelete(item.id)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <p className={`status${error ? " error" : ""}`}>{status}</p>
+
+      {loading ? (
+        <p className="empty">Loading...</p>
+      ) : (
+        <div className="board">
+          {COLUMNS.map((column) => {
+            const columnItems = itemsForColumn(column.id);
+            return (
+              <section key={column.id} className="column">
+                <header className="column-header">
+                  <h2>{column.label}</h2>
+                  <span className="column-count">{columnItems.length}</span>
+                </header>
+                {columnItems.length === 0 ? (
+                  <p className="empty">No items</p>
+                ) : (
+                  <ul className="item-list">
+                    {columnItems.map((item) => (
+                      <li key={item.id} className="item">
+                        <div className="item-info">
+                          <strong>{item.name}</strong>
+                          <span>{item.description || "No description"}</span>
+                        </div>
+                        <div className="item-actions">
+                          <button
+                            type="button"
+                            className="small"
+                            onClick={() => startEdit(item)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="small danger"
+                            onClick={() => handleDelete(item.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
     </main>
   );
 }
