@@ -1,6 +1,8 @@
-# REST API
+# Kanban Board
 
-A REST API built with **FastAPI** (Python) and SQLite, plus a React (Vite) frontend.
+A Kanban board with a **React** (Vite) frontend and a **FastAPI** + SQLite backend.
+
+Cards live in four columns: **Backlog**, **To-do**, **In Progress**, and **Done**. Create, edit, and delete cards through the UI (or the REST API).
 
 ## Setup
 
@@ -43,7 +45,7 @@ uvicorn main:app --app-dir backend --port 3000
 
 Open `http://localhost:3000`.
 
-Data is stored in `items.db` (SQLite). The file is created automatically on first run.
+Data is stored in `items.db` (SQLite). The file is created automatically on first run. Existing databases get a `status` column added on startup if needed.
 
 ## Docker
 
@@ -81,33 +83,42 @@ docker compose --profile app --profile app-dev --profile app-dev-debug down --re
 
 After a backend reload while debugging, re-attach if breakpoints stop working.
 
+## Card model
+
+| Field | Type | Notes |
+|-------|------|--------|
+| `id` | integer | Auto-generated |
+| `name` | string | Required |
+| `description` | string | Optional |
+| `status` | string | One of `backlog`, `todo`, `in-progress`, `done` (default: `backlog`) |
+
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/api/items` | List all items |
-| GET | `/api/items/{id}` | Get one item |
-| POST | `/api/items` | Create an item |
-| PUT | `/api/items/{id}` | Update an item |
-| DELETE | `/api/items/{id}` | Delete an item |
+| GET | `/api/items` | List all cards |
+| GET | `/api/items/{id}` | Get one card |
+| POST | `/api/items` | Create a card |
+| PUT | `/api/items/{id}` | Update a card |
+| DELETE | `/api/items/{id}` | Delete a card |
 
 ## Examples
 
 ```bash
-# List items
+# List cards
 curl http://localhost:3000/api/items
 
-# Create an item
+# Create a card in To-do
 curl -X POST http://localhost:3000/api/items \
   -H "Content-Type: application/json" \
-  -d '{"name": "New item", "description": "Optional description"}'
+  -d '{"name": "Ship kanban UI", "description": "Four columns", "status": "todo"}'
 
-# Update an item
+# Move a card to In Progress
 curl -X PUT http://localhost:3000/api/items/1 \
   -H "Content-Type: application/json" \
-  -d '{"name": "Updated name"}'
+  -d '{"status": "in-progress"}'
 
-# Delete an item
+# Delete a card
 curl -X DELETE http://localhost:3000/api/items/1
 ```
