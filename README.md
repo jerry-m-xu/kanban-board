@@ -49,51 +49,37 @@ Data is stored in `items.db` (SQLite). The file is created automatically on firs
 
 Requires Docker Desktop running.
 
+There are two Dockerfiles:
+- `backend/Dockerfile` — FastAPI / Uvicorn
+- `frontend/Dockerfile` — Vite (dev) or nginx (production)
+
 ```bash
-# Production-style (built image, no source mount)
-docker compose up --build
-# same as: docker compose up app --build
+# Production — backend + frontend containers
+docker compose --profile app up --build
+# open http://localhost:3000
 
-# Dev — mount backend + auto-reload
-docker compose up app-dev --build
+# Dev — API reload + Vite HMR (two containers)
+docker compose --profile app-dev up --build
+# UI: http://localhost:5173  API: http://localhost:3000
 
-# Dev + debug — reload and debugger (attach on port 5678)
-docker compose up app-dev-debug --build
+# Dev + debugger
+docker compose --profile app-dev-debug up --build
 # then: Run and Debug → "Attach to Docker" → F5
 ```
 
-Open `http://localhost:3000`.
+| Profile | Containers | Notes |
+|---------|------------|--------|
+| `app` | `backend`, `frontend` | Production; UI on **:3000** |
+| `app-dev` | `backend-dev`, `frontend-dev` | Mounts + reload; UI on **:5173** |
+| `app-dev-debug` | `backend-dev-debug`, `frontend-dev` | Same as dev + debugpy **:5678** |
 
-SQLite data is kept in a Docker volume (`sqlite_data`), so it persists across container restarts.
-
-```bash
-docker compose down          # stop
-docker compose up --build -d # rebuild and run app in background
-```
-
-| Service | Command | Behavior |
-|---------|---------|----------|
-| `app` | `docker compose up --build` | Built image, no reload |
-| `app-dev` | `docker compose up app-dev --build` | Mount `backend/`, `--reload` |
-| `app-dev-debug` | `docker compose up app-dev-debug --build` | Mount `backend/`, `--reload` **and** debugpy on `:5678` |
-
-Run **one** of these at a time (they all use port 3000).
-
-`app-dev-debug` does both reload and debugging. After a code reload, breakpoints can get flaky — detach/reattach **Attach to Docker** if they stop hitting.
-
-**Frontend note:** the container serves built React files (`frontend/dist`), not JSX source. For live UI edits:
+Each mode is a separate profile so they don’t all start at once (and fight over port 3000).
 
 ```bash
-# Terminal A
-docker compose up app-dev --build
-
-# Terminal B
-npm run dev --prefix frontend
+docker compose --profile app --profile app-dev --profile app-dev-debug down --remove-orphans
 ```
 
-Or rebuild the image after UI changes: `docker compose up --build`.
-
-For debug mode, set breakpoints in `backend/`, attach with **Attach to Docker**, then hit the API/UI.
+After a backend reload while debugging, re-attach if breakpoints stop working.
 
 ## Endpoints
 

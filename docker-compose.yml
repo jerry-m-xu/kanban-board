@@ -1,27 +1,38 @@
-x-app-base: &app-base
-  build: .
-  environment:
-    SQLITE_PATH: /app/data/items.db
-
 services:
-  # docker compose up --build
-  # docker compose up app --build
-  app:
-    <<: *app-base
-    ports:
-      - "3000:3000"
+  # Production: docker compose --profile app up --build
+  # Open http://localhost:3000 (frontend nginx proxies /api to backend)
+  backend:
+    profiles: ["app"]
+    build: ./backend
+    environment:
+      SQLITE_PATH: /app/data/items.db
     volumes:
       - sqlite_data:/app/data
     restart: unless-stopped
 
-  # docker compose up app-dev --build
-  app-dev:
-    <<: *app-base
+  frontend:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+      target: production
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Dev: docker compose --profile app-dev up --build
+  # UI http://localhost:5173  API http://localhost:3000
+  backend-dev:
     profiles: ["app-dev"]
+    build: ./backend
+    environment:
+      SQLITE_PATH: /app/data/items.db
+      WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "3000:3000"
     volumes:
-      - ./backend:/app/backend
+      - ./backend:/app
       - sqlite_data:/app/data
     command:
       [
@@ -29,25 +40,43 @@ services:
         "main:app",
         "--host",
         "0.0.0.0",
-        "--app-dir",
-        "backend",
         "--port",
         "3000",
         "--reload",
       ]
     restart: "no"
 
-  # docker compose up app-dev-debug --build
-  # then: Run and Debug → "Attach to Docker" → F5
-  # Includes both --reload and debugpy (breakpoints may need re-attach after a reload)
-  app-dev-debug:
-    <<: *app-base
+  frontend-dev:
+    profiles: ["app-dev", "app-dev-debug"]
+    build:
+      context: ./frontend
+      target: development
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      # Reach whichever backend published :3000 on the host
+      VITE_API_PROXY: http://host.docker.internal:3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    restart: "no"
+
+  # Dev + debug: docker compose --profile app-dev-debug up --build
+  # then Attach to Docker on :5678
+  backend-dev-debug:
     profiles: ["app-dev-debug"]
+    build: ./backend
+    environment:
+      SQLITE_PATH: /app/data/items.db
+      WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "3000:3000"
       - "5678:5678"
     volumes:
-      - ./backend:/app/backend
+      - ./backend:/app
       - sqlite_data:/app/data
     command:
       [
@@ -56,14 +85,11 @@ services:
         "debugpy",
         "--listen",
         "0.0.0.0:5678",
-        "--wait-for-client",
         "-m",
         "uvicorn",
         "main:app",
         "--host",
         "0.0.0.0",
-        "--app-dir",
-        "backend",
         "--port",
         "3000",
         "--reload",
@@ -72,3 +98,4 @@ services:
 
 volumes:
   sqlite_data:
+  frontend_node_modules:
