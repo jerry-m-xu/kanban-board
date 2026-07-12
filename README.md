@@ -94,6 +94,9 @@ After a backend reload while debugging, re-attach if breakpoints stop working.
 | `position` | integer | Order within the column (0-based) |
 | `due_date` | string | Required ISO date (`YYYY-MM-DD`). **Backlog** / **Done**: today or earlier. **To-do** / **In Progress**: today or later. |
 | `prerequisites` | list of ints | IDs of prerequisite cards (default `[]`). Cycles are rejected. **Done** cards may only depend on other **Done** cards. |
+| `attachments` | list | Image/video files attached to the card |
+
+Attachments are stored under `uploads/` (or `UPLOAD_DIR`) and served at `/api/attachments/{id}/file`. Allowed types: jpeg, png, gif, webp, mp4, webm, mov (max 50MB).
 
 ## Endpoints
 
@@ -105,6 +108,9 @@ After a backend reload while debugging, re-attach if breakpoints stop working.
 | POST | `/api/items` | Create a card |
 | PUT | `/api/items/{id}` | Update a card |
 | DELETE | `/api/items/{id}` | Delete a card |
+| POST | `/api/items/{id}/attachments` | Upload an image or video |
+| GET | `/api/attachments/{id}/file` | Download/view an attachment |
+| DELETE | `/api/attachments/{id}` | Delete an attachment |
 
 ## Examples
 

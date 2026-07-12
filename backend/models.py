@@ -127,6 +127,16 @@ def validate_status_move_for_prerequisites(
     return None
 
 
+class Attachment(BaseModel):
+    id: int
+    item_id: int
+    filename: str
+    original_name: str
+    content_type: str
+    kind: Literal["image", "video"]
+    url: str
+
+
 class ItemCreate(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
@@ -152,6 +162,7 @@ class Item(BaseModel):
     position: int = 0
     due_date: Optional[str] = None
     prerequisites: List[int] = Field(default_factory=list)
+    attachments: List[Attachment] = Field(default_factory=list)
 
 
 def parse_prerequisites_json(raw: Optional[str]) -> List[int]:

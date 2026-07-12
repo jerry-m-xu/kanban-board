@@ -6,6 +6,7 @@ services:
     build: ./backend
     environment:
       SQLITE_PATH: /app/data/items.db
+      UPLOAD_DIR: /app/data/uploads
     volumes:
       - sqlite_data:/app/data
     restart: unless-stopped
@@ -28,6 +29,7 @@ services:
     build: ./backend
     environment:
       SQLITE_PATH: /app/data/items.db
+      UPLOAD_DIR: /app/data/uploads
       WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "3000:3000"
@@ -71,6 +73,7 @@ services:
     build: ./backend
     environment:
       SQLITE_PATH: /app/data/items.db
+      UPLOAD_DIR: /app/data/uploads
       WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "3000:3000"

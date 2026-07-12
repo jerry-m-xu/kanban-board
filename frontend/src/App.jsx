@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./api";
+import { api, deleteAttachment, uploadAttachment } from "./api";
 import DependencyGraphModal from "./DependencyGraphModal";
 import "./App.css";
 
@@ -164,6 +164,7 @@ export default function App() {
   const [graphItemId, setGraphItemId] = useState(null);
   const [addingPrereqForId, setAddingPrereqForId] = useState(null);
   const [expandedPrereqIds, setExpandedPrereqIds] = useState(() => new Set());
+  const [previewAttachment, setPreviewAttachment] = useState(null);
   const draggedRef = useRef(false);
   const statusTimeoutRef = useRef(null);
   const itemsCountRef = useRef(0);
@@ -179,6 +180,17 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!previewAttachment) return undefined;
+    function onKeyDown(event) {
+      if (event.key === "Escape") {
+        setPreviewAttachment(null);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewAttachment]);
 
   function itemCountMessage(count = itemsCountRef.current) {
     return `${count} item(s)`;
@@ -294,6 +306,63 @@ export default function App() {
       item,
       current.filter((id) => id !== prerequisiteId)
     );
+  }
+
+  async function handleAttachmentUpload(item, fileList) {
+    const files = [...(fileList || [])];
+    if (!files.length) return;
+
+    showStatus("Uploading...");
+    try {
+      const uploaded = [];
+      for (const file of files) {
+        uploaded.push(await uploadAttachment(item.id, file));
+      }
+      setItems((current) =>
+        current.map((entry) =>
+          entry.id === item.id
+            ? {
+                ...entry,
+                attachments: [...(entry.attachments || []), ...uploaded],
+              }
+            : entry
+        )
+      );
+      showStatus(
+        uploaded.length === 1
+          ? "Attachment added"
+          : `${uploaded.length} attachments added`
+      );
+    } catch (err) {
+      showStatus(err.message, true);
+    }
+  }
+
+  async function handleAttachmentDelete(item, attachmentId) {
+    if (!window.confirm("Remove this attachment?")) return;
+
+    const previousItems = items;
+    setItems((current) =>
+      current.map((entry) =>
+        entry.id === item.id
+          ? {
+              ...entry,
+              attachments: (entry.attachments || []).filter(
+                (attachment) => attachment.id !== attachmentId
+              ),
+            }
+          : entry
+      )
+    );
+    showStatus("Deleting...");
+
+    try {
+      await deleteAttachment(attachmentId);
+      showStatus("Attachment removed");
+    } catch (err) {
+      setItems(previousItems);
+      showStatus(err.message, true);
+    }
   }
 
   function resetAddForm() {
@@ -1139,6 +1208,100 @@ export default function App() {
                               </p>
                             )}
                           </div>
+                          <div
+                            className="item-attachments"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="item-attachments-header">
+                              <span className="item-attachments-label">
+                                Media
+                              </span>
+                              <label className="attachment-add-button">
+                                <span aria-hidden="true">+</span>
+                                <span className="visually-hidden">
+                                  Add image or video
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime"
+                                  multiple
+                                  onChange={(e) => {
+                                    handleAttachmentUpload(
+                                      item,
+                                      e.target.files
+                                    );
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            </div>
+                            {(item.attachments || []).length === 0 ? (
+                              <p className="item-attachments-empty">
+                                No images or videos
+                              </p>
+                            ) : (
+                              <ul className="item-attachments-list">
+                                {(item.attachments || []).map((attachment) => (
+                                  <li
+                                    key={attachment.id}
+                                    className="item-attachment"
+                                  >
+                                    <button
+                                      type="button"
+                                      className="attachment-thumb"
+                                      onClick={() =>
+                                        setPreviewAttachment(attachment)
+                                      }
+                                      aria-label={`Preview ${attachment.original_name}`}
+                                    >
+                                      {attachment.kind === "image" ? (
+                                        <img
+                                          src={attachment.url}
+                                          alt={attachment.original_name}
+                                        />
+                                      ) : (
+                                        <video
+                                          src={attachment.url}
+                                          muted
+                                          preload="metadata"
+                                        />
+                                      )}
+                                      {attachment.kind === "video" && (
+                                        <span
+                                          className="attachment-play-badge"
+                                          aria-hidden="true"
+                                        >
+                                          ▶
+                                        </span>
+                                      )}
+                                    </button>
+                                    <div className="attachment-meta">
+                                      <span
+                                        className="attachment-name"
+                                        title={attachment.original_name}
+                                      >
+                                        {attachment.original_name}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="attachment-remove"
+                                        aria-label={`Remove ${attachment.original_name}`}
+                                        onClick={() =>
+                                          handleAttachmentDelete(
+                                            item,
+                                            attachment.id
+                                          )
+                                        }
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
                         </div>
                       </li>
                     );
@@ -1162,6 +1325,49 @@ export default function App() {
             onClose={() => setGraphItemId(null)}
           />
         )}
+
+      {previewAttachment && (
+        <div
+          className="media-preview-backdrop"
+          onClick={() => setPreviewAttachment(null)}
+          role="presentation"
+        >
+          <div
+            className="media-preview-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={previewAttachment.original_name}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="media-preview-close"
+              aria-label="Close preview"
+              onClick={() => setPreviewAttachment(null)}
+            >
+              ×
+            </button>
+            <div className="media-preview-content">
+              {previewAttachment.kind === "image" ? (
+                <img
+                  src={previewAttachment.url}
+                  alt={previewAttachment.original_name}
+                />
+              ) : (
+                <video
+                  src={previewAttachment.url}
+                  controls
+                  autoPlay
+                  preload="metadata"
+                />
+              )}
+            </div>
+            <p className="media-preview-caption">
+              {previewAttachment.original_name}
+            </p>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

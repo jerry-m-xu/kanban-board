@@ -1,22 +1,33 @@
 from typing import List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from database import (
+    MAX_UPLOAD_BYTES,
+    UPLOAD_DIR,
+    create_attachment,
+    delete_attachment_files,
+    delete_attachments_for_item,
+    get_attachment,
     get_connection,
     init_db,
+    kind_for_content_type,
+    list_attachments_by_item_ids,
+    list_attachments_for_item,
     load_prerequisite_map,
     load_status_map,
     next_position,
     normalize_due_date,
     remove_prerequisite_references,
     row_to_item,
+    unique_stored_filename,
 )
 from models import (
+    Attachment,
     Item,
     ItemCreate,
     ItemUpdate,
@@ -51,13 +62,21 @@ def health():
     return {"status": "ok"}
 
 
+def hydrate_items(conn, rows) -> List[dict]:
+    item_ids = [int(row["id"]) for row in rows]
+    attachments_by_item = list_attachments_by_item_ids(conn, item_ids)
+    return [
+        row_to_item(row, attachments_by_item.get(int(row["id"]), [])) for row in rows
+    ]
+
+
 @app.get("/api/items", response_model=List[Item])
 def list_items():
     with get_connection() as conn:
         rows = conn.execute(
             f"SELECT {ITEM_COLUMNS} FROM items ORDER BY status, position, id"
         ).fetchall()
-    return [row_to_item(row) for row in rows]
+        return hydrate_items(conn, rows)
 
 
 @app.get("/api/items/{item_id}", response_model=Item)
@@ -67,9 +86,9 @@ def get_item(item_id: int):
             f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
             (item_id,),
         ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return row_to_item(row)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return row_to_item(row, list_attachments_for_item(conn, item_id))
 
 
 @app.post("/api/items", response_model=Item, status_code=201)
@@ -112,7 +131,7 @@ def create_item(payload: ItemCreate):
             f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
             (item_id,),
         ).fetchone()
-    return row_to_item(row)
+        return row_to_item(row, [])
 
 
 @app.put("/api/items/{item_id}", response_model=Item)
@@ -196,17 +215,98 @@ def update_item(item_id: int, payload: ItemUpdate):
             f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
             (item_id,),
         ).fetchone()
-    return row_to_item(updated)
+        return row_to_item(updated, list_attachments_for_item(conn, item_id))
 
 
 @app.delete("/api/items/{item_id}", status_code=204)
 def delete_item(item_id: int):
     with get_connection() as conn:
-        cursor = conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
-        if cursor.rowcount == 0:
+        row = conn.execute(
+            f"SELECT {ITEM_COLUMNS} FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail="Item not found")
+        delete_attachments_for_item(conn, item_id)
+        conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
         remove_prerequisite_references(conn, item_id)
         conn.commit()
+
+
+@app.post(
+    "/api/items/{item_id}/attachments",
+    response_model=Attachment,
+    status_code=201,
+)
+async def upload_attachment(item_id: int, file: UploadFile = File(...)):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    kind = kind_for_content_type(content_type)
+    if kind is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Only image (jpeg, png, gif, webp) and video (mp4, webm, mov) files are allowed",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="File is too large (max 50MB)",
+        )
+
+    original_name = Path(file.filename or f"upload.{kind}").name
+    stored_name = unique_stored_filename(original_name)
+    destination = UPLOAD_DIR / stored_name
+    destination.write_bytes(data)
+
+    with get_connection() as conn:
+        return create_attachment(
+            conn,
+            item_id=item_id,
+            filename=stored_name,
+            original_name=original_name,
+            content_type=content_type,
+            kind=kind,
+        )
+
+
+@app.get("/api/attachments/{attachment_id}/file")
+def download_attachment(attachment_id: int):
+    with get_connection() as conn:
+        row = get_attachment(conn, attachment_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        path = UPLOAD_DIR / row["filename"]
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Attachment file missing")
+        return FileResponse(
+            path,
+            media_type=row["content_type"],
+            filename=row["original_name"],
+            content_disposition_type="inline",
+        )
+
+
+@app.delete("/api/attachments/{attachment_id}", status_code=204)
+def delete_attachment(attachment_id: int):
+    with get_connection() as conn:
+        row = get_attachment(conn, attachment_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        filename = row["filename"]
+        conn.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+        conn.commit()
+    delete_attachment_files([filename])
 
 
 if DIST_PATH.exists():
