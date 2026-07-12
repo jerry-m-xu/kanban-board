@@ -208,6 +208,7 @@ button.small {
 }
 
 .item {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -216,6 +217,14 @@ button.small {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
+}
+
+.item.drop-before {
+  box-shadow: 0 -3px 0 #2563eb;
+}
+
+.item.drop-after {
+  box-shadow: 0 3px 0 #2563eb;
 }
 
 .item-header {

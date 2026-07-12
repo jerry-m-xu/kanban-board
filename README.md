@@ -91,6 +91,7 @@ After a backend reload while debugging, re-attach if breakpoints stop working.
 | `name` | string | Required |
 | `description` | string | Optional |
 | `status` | string | One of `backlog`, `todo`, `in-progress`, `done` (default: `backlog`) |
+| `position` | integer | Order within the column (0-based) |
 
 ## Endpoints
 

@@ -6,13 +6,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from database import get_connection, init_db, row_to_item
+from database import get_connection, init_db, next_position, row_to_item
 from models import Item, ItemCreate, ItemUpdate
 
 app = FastAPI(title="REST API")
 
 DIST_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-ITEM_COLUMNS = "id, name, description, status"
+ITEM_COLUMNS = "id, name, description, status, position"
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,7 +37,7 @@ def health():
 def list_items():
     with get_connection() as conn:
         rows = conn.execute(
-            f"SELECT {ITEM_COLUMNS} FROM items ORDER BY id"
+            f"SELECT {ITEM_COLUMNS} FROM items ORDER BY status, position, id"
         ).fetchall()
     return [row_to_item(row) for row in rows]
 
@@ -57,9 +57,10 @@ def get_item(item_id: int):
 @app.post("/api/items", response_model=Item, status_code=201)
 def create_item(payload: ItemCreate):
     with get_connection() as conn:
+        position = next_position(conn, payload.status)
         cursor = conn.execute(
-            "INSERT INTO items (name, description, status) VALUES (?, ?, ?)",
-            (payload.name, payload.description, payload.status),
+            "INSERT INTO items (name, description, status, position) VALUES (?, ?, ?, ?)",
+            (payload.name, payload.description, payload.status, position),
         )
         conn.commit()
         item_id = cursor.lastrowid
@@ -90,10 +91,13 @@ def update_item(item_id: int, payload: ItemUpdate):
             else row["description"]
         )
         status = payload.status if payload.status is not None else row["status"]
+        position = (
+            payload.position if payload.position is not None else row["position"]
+        )
 
         conn.execute(
-            "UPDATE items SET name = ?, description = ?, status = ? WHERE id = ?",
-            (name, description, status, item_id),
+            "UPDATE items SET name = ?, description = ?, status = ?, position = ? WHERE id = ?",
+            (name, description, status, position, item_id),
         )
         conn.commit()
         updated = conn.execute(

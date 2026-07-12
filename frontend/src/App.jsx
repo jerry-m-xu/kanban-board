@@ -11,6 +11,16 @@ const COLUMNS = [
 
 const emptyForm = { name: "", description: "" };
 
+function sortByPosition(a, b) {
+  const positionDiff = (a.position ?? 0) - (b.position ?? 0);
+  if (positionDiff !== 0) return positionDiff;
+  return a.id - b.id;
+}
+
+function withRenumberedPositions(columnItems) {
+  return columnItems.map((item, index) => ({ ...item, position: index }));
+}
+
 export default function App() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -19,6 +29,7 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
+  const [dragOverItem, setDragOverItem] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -158,26 +169,100 @@ export default function App() {
     }
   }
 
-  async function moveItem(itemId, nextStatus) {
+  async function persistItemUpdates(updates) {
+    await Promise.all(
+      updates.map((update) =>
+        api(`/${update.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            status: update.status,
+            position: update.position,
+          }),
+        })
+      )
+    );
+  }
+
+  async function placeItem(itemId, targetStatus, targetIndex) {
     const item = items.find((entry) => entry.id === itemId);
     if (!item) return;
 
-    const currentStatus = item.status || "backlog";
-    if (currentStatus === nextStatus) return;
+    const sourceStatus = item.status || "backlog";
+    const sourceItems = items
+      .filter(
+        (entry) =>
+          (entry.status || "backlog") === sourceStatus && entry.id !== itemId
+      )
+      .sort(sortByPosition);
+    const targetItemsBase =
+      sourceStatus === targetStatus
+        ? sourceItems
+        : items
+            .filter((entry) => (entry.status || "backlog") === targetStatus)
+            .sort(sortByPosition);
+
+    const clampedIndex = Math.max(
+      0,
+      Math.min(targetIndex, targetItemsBase.length)
+    );
+    const nextTargetItems = withRenumberedPositions([
+      ...targetItemsBase.slice(0, clampedIndex),
+      { ...item, status: targetStatus },
+      ...targetItemsBase.slice(clampedIndex),
+    ]);
+
+    const nextSourceItems =
+      sourceStatus === targetStatus
+        ? nextTargetItems
+        : withRenumberedPositions(sourceItems);
 
     const previousItems = items;
-    setItems((current) =>
-      current.map((entry) =>
-        entry.id === itemId ? { ...entry, status: nextStatus } : entry
-      )
-    );
+    const nextItems = items.map((entry) => {
+      if (sourceStatus !== targetStatus) {
+        const sourceMatch = nextSourceItems.find((row) => row.id === entry.id);
+        if (sourceMatch) return sourceMatch;
+      }
+      const targetMatch = nextTargetItems.find((row) => row.id === entry.id);
+      if (targetMatch) return targetMatch;
+      return entry;
+    });
+
+    const unchanged =
+      sourceStatus === targetStatus &&
+      (item.position ?? 0) === clampedIndex &&
+      items
+        .filter((entry) => (entry.status || "backlog") === sourceStatus)
+        .sort(sortByPosition)
+        .every((entry, index) => entry.id === nextTargetItems[index]?.id);
+
+    if (unchanged) return;
+
+    setItems(nextItems);
     showStatus("Moving...");
 
+    const updates = [
+      ...nextTargetItems.map((entry) => ({
+        id: entry.id,
+        status: entry.status,
+        position: entry.position,
+      })),
+    ];
+    if (sourceStatus !== targetStatus) {
+      updates.push(
+        ...nextSourceItems.map((entry) => ({
+          id: entry.id,
+          status: entry.status,
+          position: entry.position,
+        }))
+      );
+    }
+
+    const uniqueUpdates = Array.from(
+      new Map(updates.map((update) => [update.id, update])).values()
+    );
+
     try {
-      await api(`/${itemId}`, {
-        method: "PUT",
-        body: JSON.stringify({ status: nextStatus }),
-      });
+      await persistItemUpdates(uniqueUpdates);
       showStatus("Item moved");
     } catch (err) {
       setItems(previousItems);
@@ -200,6 +285,7 @@ export default function App() {
     draggedRef.current = true;
     setDraggingId(null);
     setDragOverColumn(null);
+    setDragOverItem(null);
     window.setTimeout(() => {
       draggedRef.current = false;
     }, 0);
@@ -216,6 +302,7 @@ export default function App() {
   function handleColumnDragLeave(e, columnId) {
     if (!e.currentTarget.contains(e.relatedTarget)) {
       setDragOverColumn((current) => (current === columnId ? null : current));
+      setDragOverItem(null);
     }
   }
 
@@ -225,12 +312,59 @@ export default function App() {
     const itemId = Number(rawId);
     setDraggingId(null);
     setDragOverColumn(null);
+    setDragOverItem(null);
     if (!Number.isFinite(itemId)) return;
-    await moveItem(itemId, columnId);
+
+    const columnItems = itemsForColumn(columnId).filter(
+      (entry) => entry.id !== itemId
+    );
+    await placeItem(itemId, columnId, columnItems.length);
+  }
+
+  function handleItemDragOver(e, item, columnId) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+
+    if (draggingId === item.id) {
+      setDragOverItem(null);
+      return;
+    }
+
+    const bounds = e.currentTarget.getBoundingClientRect();
+    const edge = e.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    setDragOverColumn(columnId);
+    setDragOverItem((current) => {
+      if (current?.id === item.id && current.edge === edge) return current;
+      return { id: item.id, edge };
+    });
+  }
+
+  async function handleItemDrop(e, item, columnId) {
+    e.preventDefault();
+    e.stopPropagation();
+    const rawId = e.dataTransfer.getData("text/plain");
+    const itemId = Number(rawId);
+    const edge = dragOverItem?.id === item.id ? dragOverItem.edge : "before";
+    setDraggingId(null);
+    setDragOverColumn(null);
+    setDragOverItem(null);
+    if (!Number.isFinite(itemId) || itemId === item.id) return;
+
+    const columnItems = itemsForColumn(columnId).filter(
+      (entry) => entry.id !== itemId
+    );
+    const targetIndex = columnItems.findIndex((entry) => entry.id === item.id);
+    if (targetIndex === -1) return;
+
+    const insertIndex = edge === "before" ? targetIndex : targetIndex + 1;
+    await placeItem(itemId, columnId, insertIndex);
   }
 
   function itemsForColumn(columnId) {
-    return items.filter((item) => (item.status || "backlog") === columnId);
+    return items
+      .filter((item) => (item.status || "backlog") === columnId)
+      .sort(sortByPosition);
   }
 
   function renderAddForm(columnId) {
@@ -327,16 +461,24 @@ export default function App() {
                       editing.field === "description";
                     const isEditing = editingName || editingDescription;
                     const isDragging = draggingId === item.id;
+                    const dropEdge =
+                      dragOverItem?.id === item.id ? dragOverItem.edge : null;
 
                     return (
                       <li
                         key={item.id}
                         className={`item item-${column.id}${
                           isDragging ? " item-dragging" : ""
-                        }${isEditing ? "" : " item-draggable"}`}
+                        }${isEditing ? "" : " item-draggable"}${
+                          dropEdge === "before" ? " drop-before" : ""
+                        }${dropEdge === "after" ? " drop-after" : ""}`}
                         draggable={!isEditing}
                         onDragStart={(e) => handleDragStart(e, item)}
                         onDragEnd={handleDragEnd}
+                        onDragOver={(e) =>
+                          handleItemDragOver(e, item, column.id)
+                        }
+                        onDrop={(e) => handleItemDrop(e, item, column.id)}
                       >
                         <div
                           className="item-header"

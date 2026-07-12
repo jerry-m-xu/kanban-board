@@ -15,6 +15,7 @@ class ItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[ColumnStatus] = None
+    position: Optional[int] = None
 
 
 class Item(BaseModel):
@@ -22,3 +23,4 @@ class Item(BaseModel):
     name: str
     description: str = ""
     status: ColumnStatus = "backlog"
+    position: int = 0
