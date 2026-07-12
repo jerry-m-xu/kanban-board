@@ -16,6 +16,8 @@ export default function App() {
   const [form, setForm] = useState(emptyForm);
   const [addingColumn, setAddingColumn] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverColumn, setDragOverColumn] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -126,6 +128,72 @@ export default function App() {
     }
   }
 
+  async function moveItem(itemId, nextStatus) {
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item) return;
+
+    const currentStatus = item.status || "backlog";
+    if (currentStatus === nextStatus) return;
+
+    const previousItems = items;
+    setItems((current) =>
+      current.map((entry) =>
+        entry.id === itemId ? { ...entry, status: nextStatus } : entry
+      )
+    );
+    showStatus("Moving...");
+
+    try {
+      await api(`/${itemId}`, {
+        method: "PUT",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      showStatus("Item moved");
+    } catch (err) {
+      setItems(previousItems);
+      showStatus(err.message, true);
+    }
+  }
+
+  function handleDragStart(e, item) {
+    if (editingId === item.id) {
+      e.preventDefault();
+      return;
+    }
+    setDraggingId(item.id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(item.id));
+  }
+
+  function handleDragEnd() {
+    setDraggingId(null);
+    setDragOverColumn(null);
+  }
+
+  function handleColumnDragOver(e, columnId) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverColumn !== columnId) {
+      setDragOverColumn(columnId);
+    }
+  }
+
+  function handleColumnDragLeave(e, columnId) {
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setDragOverColumn((current) => (current === columnId ? null : current));
+    }
+  }
+
+  async function handleColumnDrop(e, columnId) {
+    e.preventDefault();
+    const rawId = e.dataTransfer.getData("text/plain");
+    const itemId = Number(rawId);
+    setDraggingId(null);
+    setDragOverColumn(null);
+    if (!Number.isFinite(itemId)) return;
+    await moveItem(itemId, columnId);
+  }
+
   function itemsForColumn(columnId) {
     return items.filter((item) => (item.status || "backlog") === columnId);
   }
@@ -179,9 +247,16 @@ export default function App() {
           {COLUMNS.map((column) => {
             const columnItems = itemsForColumn(column.id);
             const isAdding = addingColumn === column.id;
+            const isDropTarget = dragOverColumn === column.id;
 
             return (
-              <section key={column.id} className="column">
+              <section
+                key={column.id}
+                className={`column${isDropTarget ? " column-drop-target" : ""}`}
+                onDragOver={(e) => handleColumnDragOver(e, column.id)}
+                onDragLeave={(e) => handleColumnDragLeave(e, column.id)}
+                onDrop={(e) => handleColumnDrop(e, column.id)}
+              >
                 <header className="column-header">
                   <div className="column-title">
                     <h2>{column.label}</h2>
@@ -210,43 +285,58 @@ export default function App() {
                     </li>
                   )}
 
-                  {columnItems.map((item) => (
-                    <li key={item.id} className="item">
-                      {editingId === item.id ? (
-                        renderItemForm({
-                          onSubmit: (e) => handleUpdate(e, item),
-                          submitLabel: "Save",
-                        })
-                      ) : (
-                        <>
-                          <div className="item-info">
-                            <strong>{item.name}</strong>
-                            <span>{item.description || "No description"}</span>
-                          </div>
-                          <div className="item-actions">
-                            <button
-                              type="button"
-                              className="small"
-                              onClick={() => startEdit(item)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="small danger"
-                              onClick={() => handleDelete(item.id)}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </li>
-                  ))}
+                  {columnItems.map((item) => {
+                    const isEditing = editingId === item.id;
+                    const isDragging = draggingId === item.id;
+
+                    return (
+                      <li
+                        key={item.id}
+                        className={`item${isDragging ? " item-dragging" : ""}${
+                          isEditing ? "" : " item-draggable"
+                        }`}
+                        draggable={!isEditing}
+                        onDragStart={(e) => handleDragStart(e, item)}
+                        onDragEnd={handleDragEnd}
+                      >
+                        {isEditing ? (
+                          renderItemForm({
+                            onSubmit: (e) => handleUpdate(e, item),
+                            submitLabel: "Save",
+                          })
+                        ) : (
+                          <>
+                            <div className="item-info">
+                              <strong>{item.name}</strong>
+                              <span>
+                                {item.description || "No description"}
+                              </span>
+                            </div>
+                            <div className="item-actions">
+                              <button
+                                type="button"
+                                className="small"
+                                onClick={() => startEdit(item)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="small danger"
+                                onClick={() => handleDelete(item.id)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
 
                 {!isAdding && columnItems.length === 0 && (
-                  <p className="empty">No items</p>
+                  <p className="empty">Drop items here</p>
                 )}
               </section>
             );
